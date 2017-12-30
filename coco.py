@@ -48,6 +48,8 @@ import shutil
 from config import Config
 import utils
 import model as modellib
+import tensorflow as tf
+import keras.backend as K
 
 # Root directory of the project
 ROOT_DIR = os.getcwd()
@@ -59,6 +61,11 @@ COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
 # through the command line argument --logs
 DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 DEFAULT_DATASET_YEAR = "2014"
+
+# An attempt for resolving GPU memory glitch
+config2 = tf.ConfigProto()
+config2.gpu_options.allow_growth = True
+K.set_session(tf.Session(config=config2))
 
 ############################################################
 #  Configurations
@@ -75,7 +82,7 @@ class CocoConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 2
+    IMAGES_PER_GPU = 1
 
     # Uncomment to train on 8 GPUs (default is 1)
     # GPU_COUNT = 8
@@ -272,7 +279,7 @@ class CocoDataset(utils.Dataset):
         if info["source"] == "coco":
             return "http://cocodataset.org/#explore?id={}".format(info["id"])
         else:
-            super(CocoDataset, self).image_reference(image_id)
+            super(CocoDataset, self).image_reference(self, image_id)
 
     # The following two functions are from pycocotools with a few changes.
 
