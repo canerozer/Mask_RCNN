@@ -25,7 +25,6 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 
     # Run COCO evaluatoin on the last model you trained
     python3 coco.py evaluate --dataset=/path/to/coco/ --model=last
-
 """
 
 import os
