@@ -1741,6 +1741,11 @@ class MaskRCNN():
                 outputs of the model differ accordingly.
         """
         assert mode in ['training', 'inference']
+        
+        #config2 = tf.ConfigProto()
+        #config2.gpu_options.allow_growth = True
+        #config2.gpu_options.per_process_gpu_memory_fraction = 0.6
+        #K.set_session(tf.Session(config=config2))
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]

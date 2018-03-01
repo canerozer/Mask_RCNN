@@ -1,3 +1,7 @@
+"""
+Custom usage: python3 evaluation.py --test-dataset-dir="/media/dontgetdown/model_partition/UAV123/"
+"""
+
 import os
 import sys
 import random
@@ -6,12 +10,20 @@ import numpy as np
 import skimage.io
 import matplotlib
 import matplotlib.pyplot as plt
-
+import argparse
 import coco
 import utils
 import model as modellib
 import visualize
 import time
+
+# Test some videos
+parser = argparse.ArgumentParser(description='Test some videos.')
+parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
+                    default="/media/dontgetdown/model_partition/OTB",
+                    help='enter the test directory')
+
+args = parser.parse_args()
 
 
 # Root directory of the project
@@ -27,16 +39,15 @@ if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
 
 # Directory of images to run detection on
-#IMAGE_DIR = os.path.join(ROOT_DIR, "images")
-IMAGE_DIR = os.path.join("/media/dontgetdown/model_partition/videos")
+IMAGE_DIR = os.path.join(args.test_dataset_dir)
 
-# Put the frames of videos to
-#
+
 frame_folder_names = os.listdir(IMAGE_DIR)
 video_directories = []
 video_names = []
 for folder_name in frame_folder_names:
-    assert os.path.isdir(os.path.join(IMAGE_DIR, folder_name))==True , "The image directory should only contain folders"
+    assert os.path.isdir(os.path.join(IMAGE_DIR, folder_name)), (
+    "The image directory should only contain folders")
     video_names.append(folder_name)
     video_directories.append(IMAGE_DIR+"/"+folder_name)
 
@@ -79,11 +90,21 @@ def coco_to_voc_bbox_converter(y1, x1, y2, x2, roi_score):
     h = y2 - y1
     return x1, y1, w, h, roi_score
 
+def to_rgb1(im):
+    # I think this will be slow
+    w, h = im.shape
+    ret = np.empty((3, w, h), dtype=np.uint8)
+    ret[0, :, :] = im
+    ret[1, :, :] = im
+    ret[2, :, :] = im
+    return ret
+
 # Start testifying images for every frame in a particular folder_name.
 # When enumerator hits the batch size number, the model will begin detection.
 video_counter = 0
 for video_id, video_dir in enumerate(video_directories):
     print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
+    print("Video name: {}".format(video_dir))
     image_list = []
     image_ids = os.listdir(os.path.join(IMAGE_DIR, video_dir))
     image_counter = 0
@@ -91,8 +112,12 @@ for video_id, video_dir in enumerate(video_directories):
     for d, image_id in enumerate(sorted_image_ids):
         print (image_id)
         if(image_id[-4:]==".jpg"):
-            print(skimage.io.imread(os.path.join(video_dir, sorted_image_ids)))
-            #image_list.append(skimage.io.imread(os.path.join(video_dir, sorted_image_ids)))
+            #print(skimage.io.imread(os.path.join(video_dir, image_id)))
+            image = skimage.io.imread(os.path.join(video_dir, image_id))
+            if len(image.shape) == 2:
+                image = to_rgb1(image)
+            image_list.append(image)
+
         if len(image_list)==config.BATCH_SIZE:
             print("Processed Frame ID: {}/{}".format(d+1, len(image_ids)))
             results = model.detect(image_list, verbose=1)
@@ -104,7 +129,9 @@ for video_id, video_dir in enumerate(video_directories):
                     obj_score = r['scores'][score_id]
                     predicted_class_id = r['class_ids'][score_id]
                     x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
-                    f.write(str(d+1)+", "+str(x)+", "+str(y)+", "+str(w)+", "+str(h)+", "+str(score)+", "+str(class_names[predicted_class_id])+"\n")
+                    things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(d+1,
+                                    x, y, w, h, format(score, '.8f'), predicted_class_id)
+                    f.write(things_to_write)
             print("")
 
 

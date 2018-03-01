@@ -25,6 +25,7 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 
     # Run COCO evaluatoin on the last model you trained
     python3 coco.py evaluate --dataset=/path/to/coco/ --model=last
+
 """
 
 import os
@@ -364,6 +365,10 @@ def evaluate_coco(model, dataset, coco, eval_type="bbox", limit=0, image_ids=Non
 
     results = []
     for i, image_id in enumerate(image_ids):
+        # Showing status of evaluation
+        if i%100 == 0 :
+            print("{} / {} is complete.".format(str(i), str(limit)))
+
         # Load image
         image = dataset.load_image(image_id)
 
@@ -448,6 +453,7 @@ if __name__ == '__main__':
             GPU_COUNT = 1
             IMAGES_PER_GPU = 1
             DETECTION_MIN_CONFIDENCE = 0
+            STEPS_PER_EPOCH = 2000
         config = InferenceConfig()
     config.display()
 
@@ -518,6 +524,14 @@ if __name__ == '__main__':
         # Validation dataset
         dataset_val = CocoDataset()
         coco = dataset_val.load_coco(args.dataset, "minival", year=args.year, return_coco=True, auto_download=args.download)
+        dataset_val.prepare()
+        print("Running COCO evaluation on {} images.".format(args.limit))
+        evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))
+
+    elif args.command == "evaluate_trainvstrain":
+        # Validation dataset
+        dataset_val = CocoDataset()
+        coco = dataset_val.load_coco(args.dataset, "train", year=args.year, return_coco=True, auto_download=args.download)
         dataset_val.prepare()
         print("Running COCO evaluation on {} images.".format(args.limit))
         evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))

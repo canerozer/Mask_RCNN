@@ -1,3 +1,15 @@
+# How To Run (Training)
+sudo python3 coco.py train --dataset=data/coco_train/ --model=last --logs=/media/dontgetdown/model_partition/logs/
+
+# How To Run (Training_WIP)
+sudo python3 coco.py train --dataset=data_wip/coco_train/ --model=imagenet --logs=/media/dontgetdown/model_partition/logs/
+
+# How To Run (Train vs. Train)
+sudo python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=/media/dontgetdown/model_partition/logs/coco20171231T0137/mask_rcnn_coco_0160.h5
+
+# How To Run (Train vs. Train) on Provided Model
+sudo python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=mask_rcnn_coco.h5
+
 # Mask R-CNN for Object Detection and Segmentation
 
 This is an implementation of [Mask R-CNN](https://arxiv.org/abs/1703.06870) on Python 3, Keras, and TensorFlow. The model generates bounding boxes and segmentation masks for each instance of an object in the image. It's based on Feature Pyramid Network (FPN) and a ResNet101 backbone.
