@@ -178,7 +178,7 @@ for video_id, video_dir in enumerate(video_directories):
             # Clears the image list after evaluation
             image_list.clear()
 
-            with open(MODEL_DIR+"/"+video_names[video_id], 'a+') as f:
+            with open(MODEL_DIR+"/"+video_names[video_id]+"_rpn", 'a+') as f:
                 for prop_id, proposals in enumerate(r):
                     y1, x1, y2, x2 = proposals
                     x, y, w, h = coco_to_voc_bbox_converter(y1, x1, y2, x2)

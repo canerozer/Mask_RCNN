@@ -1,9 +1,6 @@
 # How To Run (Training)
 sudo python3 coco.py train --dataset=data/coco_train/ --model=last --logs=/media/dontgetdown/model_partition/logs/
 
-# How To Run (Training_WIP)
-sudo python3 coco.py train --dataset=data_wip/coco_train/ --model=imagenet --logs=/media/dontgetdown/model_partition/logs/
-
 # How To Run (Train vs. Train)
 sudo python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=/media/dontgetdown/model_partition/logs/coco20171231T0137/mask_rcnn_coco_0160.h5
 

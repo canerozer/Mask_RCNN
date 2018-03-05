@@ -20,7 +20,7 @@ import time
 # Test some videos
 parser = argparse.ArgumentParser(description='Test some videos.')
 parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
-                    default="/media/dontgetdown/model_partition/OTB",
+                    default="/home/mspr/Datasets/test_dataset",
                     help='enter the test directory')
 
 args = parser.parse_args()
@@ -123,7 +123,7 @@ for video_id, video_dir in enumerate(video_directories):
             results = model.detect(image_list, verbose=1)
             r = results[0]
             image_list.clear()
-            with open(MODEL_DIR+"/"+video_names[video_id], 'a+') as f:
+            with open(MODEL_DIR+"/"+video_names[video_id]+"_mask", 'a+') as f:
                 for score_id, scores in enumerate(r['scores']):
                     y1, x1, y2, x2 = r['rois'][score_id]
                     obj_score = r['scores'][score_id]
