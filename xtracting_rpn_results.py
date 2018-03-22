@@ -61,7 +61,7 @@ for folder_name in frame_folder_names:
     assert os.path.isdir(os.path.join(IMAGE_DIR, folder_name)), (
         "The image directory should only contain folders")
     video_names.append(folder_name)
-    video_directories.append(IMAGE_DIR+""+folder_name)
+    video_directories.append(IMAGE_DIR+"/"+folder_name)
 
 class InferenceConfig(coco.CocoConfig):
     # Set batch size to 1 since we'll be running inference on

@@ -9,6 +9,9 @@ parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
 parser.add_argument('--test-bbox-results', metavar='TB', type=str,
                     help='enter the directory containing files for \
                     final bounding boxes for each video')
+parser.add_argument('--output-type', metavar='T', type=str,
+                    help='define the type of output as ''rpn'' for region proposals\
+                    and ''mask'' for head outputs')
 
 args = parser.parse_args()
 
@@ -19,6 +22,8 @@ ROOT_DIR = os.getcwd()
 BBOX_DIR = args.test_bbox_results
 
 # Directory for videos as video frames
-IMAGE_DIR = os.path.join(args.test_dataset_dir)
+VIDEO_DIR = os.path.join(args.test_dataset_dir)
 
-print(os.listdir(IMAGE_DIR))
+video_names = os.listdir(VIDEO_DIR)
+for video_name in video_names:
+    print(video_name)
