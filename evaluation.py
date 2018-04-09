@@ -49,7 +49,7 @@ for folder_name in frame_folder_names:
     assert os.path.isdir(os.path.join(IMAGE_DIR, folder_name)), (
     "The image directory should only contain folders")
     video_names.append(folder_name)
-    video_directories.append(IMAGE_DIR+"/"+folder_name)
+    video_directories.append(os.path.join(IMAGE_DIR, folder_name))
 
 class InferenceConfig(coco.CocoConfig):
     # Set batch size to 1 since we'll be running inference on
@@ -83,7 +83,7 @@ class_names = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
                'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
                'keyboard', 'cell phone', 'microwave', 'oven', 'toaster',
                'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
-               'teddy bear', 'hair drier', 'toothbrush']
+               'teddy bear', 'hair drier', 'toothbrush', 'fish', 'face']
 
 def coco_to_voc_bbox_converter(y1, x1, y2, x2, roi_score):
     w = x2 - x1
@@ -106,6 +106,9 @@ for video_id, video_dir in enumerate(video_directories):
     print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
     print("Video name: {}".format(video_dir))
     image_list = []
+    print(IMAGE_DIR)
+    print("")
+    print(video_dir)
     image_ids = os.listdir(os.path.join(IMAGE_DIR, video_dir))
     image_counter = 0
     sorted_image_ids = sorted(image_ids, key=lambda x: x[:-4])

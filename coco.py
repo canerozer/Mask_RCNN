@@ -84,6 +84,8 @@ class CocoConfig(Config):
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 1
 
+    STEPS_PER_EPOCH = 2000
+
     # Uncomment to train on 8 GPUs (default is 1)
     # GPU_COUNT = 8
 
@@ -529,11 +531,11 @@ if __name__ == '__main__':
 
     elif args.command == "evaluate_trainvstrain":
         # Validation dataset
-        dataset_val = CocoDataset()
-        coco = dataset_val.load_coco(args.dataset, "train", year=args.year, return_coco=True, auto_download=args.download)
-        dataset_val.prepare()
-        print("Running COCO evaluation on {} images.".format(args.limit))
-        evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))
+        dataset_tvt = CocoDataset()
+        coco = dataset_tvt.load_coco(args.dataset, "train", year=args.year, return_coco=True, auto_download=args.download)
+        dataset_tvt.prepare()
+        print("Running COCO evaluation on {} images.".format(int(args.limit)))
+        evaluate_coco(model, dataset_tvt, coco, "bbox", limit=int(args.limit))
     else:
         print("'{}' is not recognized. "
               "Use 'train' or 'evaluate'".format(args.command))

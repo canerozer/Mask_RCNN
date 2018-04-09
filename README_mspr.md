@@ -3,6 +3,9 @@
 #### 1) Make a directory name called "logs"
 #### 2) All the scripts have to be run inside the project folder.
 
+## Viewing Training and Testing Metrics on Tensorboard
+--> tensorboard --logdir=run1:logs/coco2018... --port 6006
+
 ## Python Scripts Available to Run:
 ### 1) evaluation.py
 

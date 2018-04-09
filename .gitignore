@@ -1,7 +1,10 @@
 .ipynb_checkpoints/
 __pycache__/
 mask_rcnn_coco.h5
-data/
 images/
 logs/
+Datasets/
 frame_visualizer.py
+Readme_Eval
+src/
+bbox_info.txt

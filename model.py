@@ -67,6 +67,31 @@ class BatchNorm(KL.BatchNormalization):
 
 
 ############################################################
+# WORK IN PROGRESS
+# GROUP NORMALIZATION
+############################################################
+class GroupNormalization(keras.engine.topology.Layer):
+    """
+    Group Normalization implementation on Keras 2.0. 
+    """
+    def __init__(self, output_dim, **kwargs):
+        self.output_dim = output_dim
+        super(MyLayer, self).__init__(**kwargs)
+
+    def build(self, input_shape):
+        # Create a trainable weight variable for this layer.
+        self.kernel = self.add_weight(name='kernel', 
+                                      shape=(input_shape[1], self.output_dim),
+                                      initializer='uniform',
+                                      trainable=True)
+        super(MyLayer, self).build(input_shape)  # Be sure to call this somewhere!
+
+    def call(self, x):
+        return K.dot(x, self.kernel)
+
+    def compute_output_shape(self, input_shape):
+        return input_shape
+############################################################
 #  Resnet Graph
 ############################################################
 
@@ -2183,9 +2208,9 @@ class MaskRCNN():
         # Callbacks
         callbacks = [
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
-                                        histogram_freq=0, write_graph=True, write_images=False),
+                                        histogram_freq=0, write_graph=True, write_images=True),
             keras.callbacks.ModelCheckpoint(self.checkpoint_path,
-                                            verbose=0, save_weights_only=True),
+                                            verbose=0, save_weights_only=True, period=10),
         ]
 
         # Train
