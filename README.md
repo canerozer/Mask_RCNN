@@ -1,5 +1,6 @@
 # How To Run (Training)
-python3 coco.py train --dataset=data/coco_train/ --model=last --logs=/media/dontgetdown/model_partition/logs/
+python3 coco.py train --dataset=Datasets/coco/ --model=imagenet --logs=logs/
+python3 coco.py train --dataset=Datasets/coco/ --model=last --logs=logs/
 
 # How To Run (Train vs. Train)
 python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=/media/dontgetdown/model_partition/logs/coco20171231T0137/mask_rcnn_coco_0160.h5
