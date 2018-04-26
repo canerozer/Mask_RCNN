@@ -488,7 +488,7 @@ if __name__ == '__main__':
         # validation set, as as in the Mask RCNN paper.
         dataset_train = CocoDataset()
         dataset_train.load_coco(args.dataset, "train", year=args.year, auto_download=args.download)
-        dataset_train.load_coco(args.dataset, "valminusminival", year=args.year, auto_download=args.download)
+        #dataset_train.load_coco(args.dataset, "valminusminival", year=args.year, auto_download=args.download)
         dataset_train.prepare()
 
         # Validation dataset
@@ -502,7 +502,7 @@ if __name__ == '__main__':
         print("Training network heads")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=40,
+                    epochs=60,
                     layers='heads')
 
         # Training - Stage 2
@@ -510,7 +510,7 @@ if __name__ == '__main__':
         print("Fine tune Resnet stage 4 and up")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=120,
+                    epochs=180,
                     layers='4+')
 
         # Training - Stage 3
@@ -518,7 +518,7 @@ if __name__ == '__main__':
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE / 10,
-                    epochs=160,
+                    epochs=220,
                     layers='all')
 
     elif args.command == "evaluate":

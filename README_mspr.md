@@ -9,14 +9,14 @@
 ## Python Scripts Available to Run:
 ### 1) evaluation.py
 
+Sample terminal command: python3 evaluation.py --test-dataset-dir /path/to/dataset
+
 --> Extracts the bounding box coordinates of the objects using the head of the
 network in a text file. The text file also contains the objectness score and class label
 of the objects.
 
 Takes --test-dataset-dir argument as the input, which provides
 the videos as video frames in separate folders. It will output the results to the
-
-Sample terminal command: python3 evaluation.py --test-dataset-dir /path/to/dataset
 
 Sample dataset folder:
 dataset/

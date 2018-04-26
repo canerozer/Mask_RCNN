@@ -8,6 +8,12 @@ python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=/media/
 # How To Run (Train vs. Train) on Provided Model
 python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=mask_rcnn_coco.h5
 
+# How To Run TensorBoard using the logs directory
+tensorboard --logdir=run1:logs/coco2018... --port 6006
+
+# How To Convert From Semiautomatic LabelMe Format to MS COCO JSON?
+Refer to the inspect_json.ipynb guideline. 
+
 # Mask R-CNN for Object Detection and Segmentation
 
 This is an implementation of [Mask R-CNN](https://arxiv.org/abs/1703.06870) on Python 3, Keras, and TensorFlow. The model generates bounding boxes and segmentation masks for each instance of an object in the image. It's based on Feature Pyramid Network (FPN) and a ResNet101 backbone.
