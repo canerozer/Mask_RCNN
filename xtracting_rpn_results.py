@@ -68,6 +68,7 @@ class InferenceConfig(coco.CocoConfig):
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
+    NUM_CLASSES = 80 + 1
 
 config = InferenceConfig()
 config.display()
@@ -171,7 +172,8 @@ for video_id, video_dir in enumerate(video_directories):
             scores = ((np.sort(results['rpn_class'][:, :, 1]
                                .flatten()))[::-1])[:limit]
 
-            # A little bit of math for inversing 1024x1024 to dim[0]xdim[1]
+            # A little bit of math for converting image dimensions 
+            # from 1024 x 1024 to dim[0] x dim[1]
             r = (r - np.array((aver_pad_y, aver_pad_x,
                                aver_pad_y, aver_pad_x)))/scale
 
@@ -190,8 +192,9 @@ for video_id, video_dir in enumerate(video_directories):
                         w = dims[1] - x
                     if y + h > dims[0]:
                         h = dims[0] - y
-                    things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\n".format(
-                        prop_id+1, format(x, '.2f'), format(y, '.2f'),
+                    things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
+                        format(image_id, '.8s'), prop_id+1,
+                        format(x, '.2f'), format(y, '.2f'),
                         format(w, '.2f'), format(h, '.2f'),
                         format(scores[prop_id], '.8f'))
                     f.write(things_to_write)

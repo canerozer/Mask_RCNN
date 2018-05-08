@@ -56,7 +56,7 @@ class InferenceConfig(coco.CocoConfig):
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
-    NUM_CLASSES = 81 + 1
+    NUM_CLASSES = 80 + 1
 
 config = InferenceConfig()
 config.display()
@@ -86,7 +86,7 @@ class_names = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
                'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
                'keyboard', 'cell phone', 'microwave', 'oven', 'toaster',
                'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
-               'teddy bear', 'hair drier', 'toothbrush', 'face', 'fish']
+               'teddy bear', 'hair drier', 'toothbrush']
 
 
 def coco_to_voc_bbox_converter(y1, x1, y2, x2, roi_score):
