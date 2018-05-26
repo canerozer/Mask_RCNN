@@ -57,6 +57,9 @@ class InferenceConfig(coco.CocoConfig):
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
     NUM_CLASSES = 80 + 1
+    # RPN_NMS_THRESHOLD = 0.7   
+    # DETECTION_NMS_THRESHOLD = 0.2
+    DETECTION_MIN_CONFIDENCE = 0.01
 
 config = InferenceConfig()
 config.display()
@@ -103,43 +106,66 @@ def to_rgb1(im):
     ret[2, :, :] = im
     return ret
 
+def softmax(arr):
+    maximum_nr = np.max(arr, axis=1)
+    arr = arr - maximum_nr[:, np.newaxis]
+    probs = np.exp(arr)/(np.sum(np.exp(arr), axis=1)[:, np.newaxis])
+    return probs
+
+
 # Start testifying images for every frame in a particular folder_name.
 # When enumerator hits the batch size number, the model will begin detection.
 video_counter = 0
-for video_id, video_dir in enumerate(video_directories):
-    print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
-    print("Video name: {}".format(video_dir))
-    image_list = []
-    print(IMAGE_DIR)
-    print("")
-    print(video_dir)
-    image_ids = os.listdir(video_dir)
-    image_counter = 0
-    sorted_image_ids = sorted(image_ids, key=lambda x: x[:-4])
-    for d, image_id in enumerate(sorted_image_ids):
-        print (image_id)
-        if(image_id[-4:]==".jpg"):
-            #print(skimage.io.imread(os.path.join(video_dir, image_id)))
-            image = skimage.io.imread(os.path.join(video_dir, image_id))
-            if len(image.shape) == 2:
-                image = to_rgb1(image)
-            image_list.append(image)
 
-        if len(image_list)==config.BATCH_SIZE:
-            print("Processed Frame ID: {}/{}".format(d+1, len(image_ids)))
-            results = model.detect(image_list, verbose=1)
-            r = results[0]
-            image_list.clear()
-            with open(MODEL_DIR+"/"+video_names[video_id]+"_mask", 'a+') as f:
+for video_id, video_dir in enumerate(video_directories):
+    with open(MODEL_DIR+"/"+video_names[video_id]+"_mask", 'a+') as f:
+        f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
+        print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
+        print("Video name: {}".format(video_dir))
+        image_list = []
+        print(IMAGE_DIR)
+        print("")
+        print(video_dir)
+        image_ids = os.listdir(video_dir)
+        image_counter = 0
+        sorted_image_ids = sorted(image_ids, key=lambda x: x[:-4])
+        for d, image_id in enumerate(sorted_image_ids):
+            print (image_id)
+            if(image_id[-4:]==".jpg"):
+                #print(skimage.io.imread(os.path.join(video_dir, image_id)))
+                image = skimage.io.imread(os.path.join(video_dir, image_id))
+                if len(image.shape) == 2:
+                    image = to_rgb1(image)
+                image_list.append(image)
+
+            if len(image_list)==config.BATCH_SIZE:
+                print("Processed Frame ID: {}/{}".format(d+1, len(image_ids)))
+                results = model.detect(image_list, verbose=1)
+                r = results[0]
+                image_list.clear()
                 for score_id, scores in enumerate(r['scores']):
                     y1, x1, y2, x2 = r['rois'][score_id]
                     obj_score = r['scores'][score_id]
                     predicted_class_id = r['class_ids'][score_id]
+
+                    # Max top-5 probabilities
+                    probs = -np.sort(-r['logits'][score_id])[:5]
+
+                    # Arguments of top-5
+                    p_c_ids = np.argsort(-r['logits'][score_id])[:5]
+
                     x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
-                    things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(d+1,
-                                    x, y, w, h, format(score, '.8f'), predicted_class_id)
+                    things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
+                                      .format(d+1, x, y, w, h, format(score, '.8f'), 
+                                      predicted_class_id, p_c_ids[0],
+                                    format(probs[0], '.8f'), p_c_ids[1],
+                                    format(probs[1], '.8f'), p_c_ids[2],
+                                    format(probs[2], '.8f'), p_c_ids[3],
+                                    format(probs[3], '.8f'), p_c_ids[4],
+                                    format(probs[4], '.8f'))
                     f.write(things_to_write)
-            print("")
+
+                print("")
 
 
 

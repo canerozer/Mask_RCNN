@@ -32,9 +32,9 @@ parser.add_argument('--image-extension', metavar='CDC', type=str,
 
 args = parser.parse_args()
 
-config_keras = tf.ConfigProto()
-# config_keras.gpu_options.allow_growth = True
-config_keras.gpu_options.allocator_type = 'BFC'
+gpu_options = tf.GPUOptions(allow_growth=True)
+# gpu_options = tf.GPUOptions(allocator_type = 'BFC')
+config_keras = tf.ConfigProto(gpu_options=gpu_options)
 K.set_session(tf.Session(config=config_keras))
 
 
@@ -42,7 +42,7 @@ K.set_session(tf.Session(config=config_keras))
 ROOT_DIR = os.getcwd()
 
 # Directory to save logs and trained model
-MODEL_DIR = os.path.join(ROOT_DIR, "logs")
+LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 
 # Local path to trained weights file
 COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
@@ -69,12 +69,13 @@ class InferenceConfig(coco.CocoConfig):
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
     NUM_CLASSES = 80 + 1
+    RPN_ANCHOR_STRIDE = 1
 
 config = InferenceConfig()
 config.display()
 
 # Create model object in inference mode.
-model = modellib.MaskRCNN(mode="inference", model_dir=MODEL_DIR, config=config)
+model = modellib.MaskRCNN(mode="inference", model_dir=LOGS_DIR, config=config)
 
 # Load weights trained on MS-COCO
 model.load_weights(COCO_MODEL_PATH, by_name=True)
@@ -146,10 +147,11 @@ for video_id, video_dir in enumerate(video_directories):
             image_list.append(image)
 
             # Get the scale and padding parameters by using resize_image.
-            m_image, x, scale, pad = utils.resize_image(image,
-                                                        config.IMAGE_MIN_DIM,
-                                                        config.IMAGE_MAX_DIM,
-                                                        config.IMAGE_PADDING)
+            _, _, scale, pad, _ = utils.resize_image(image,
+                                                    min_dim=config.IMAGE_MIN_DIM,
+                                                    max_dim=config.IMAGE_MAX_DIM,
+                                                    min_scale=config.IMAGE_MIN_SCALE,
+                                                    mode="square")
 
             # Roughly calculate padding across different axises.
             aver_pad_y = (pad[0][0] + pad[0][1])/2
@@ -160,6 +162,8 @@ for video_id, video_dir in enumerate(video_directories):
                                                      len(sorted_image_ids)))
 
             # Code taken from the iPython file, to retrieve the top anchors.
+            time_start = time.time()
+
             pillar = model.keras_model.get_layer("ROI").output
             results = model.run_graph(image_list, [
                 ("rpn_class", model.keras_model.get_layer("rpn_class").output),
@@ -168,19 +172,26 @@ for video_id, video_dir in enumerate(video_directories):
                     model.ancestor(pillar, "ROI/refined_anchors_clipped:0")),
             ])
 
+            # Updating to the recent version of refined_anchors_clipped,
+            # Normalized coordinates will be resized to 1024 x 1024
             r = results["refined_anchors_clipped"][0, :limit]
+            r = r * np.array([1024, 1024, 1024, 1024])
+
             scores = ((np.sort(results['rpn_class'][:, :, 1]
                                .flatten()))[::-1])[:limit]
 
+            print(time.time() - time_start)
+            
             # A little bit of math for converting image dimensions 
             # from 1024 x 1024 to dim[0] x dim[1]
+
             r = (r - np.array((aver_pad_y, aver_pad_x,
                                aver_pad_y, aver_pad_x)))/scale
 
             # Clears the image list after evaluation
             image_list.clear()
 
-            with open(MODEL_DIR+"/"+video_names[video_id]+"_rpn", 'a+') as f:
+            with open(LOGS_DIR+"/"+video_names[video_id]+"_rpn", 'a+') as f:
                 for prop_id, proposals in enumerate(r):
                     y1, x1, y2, x2 = proposals
                     x, y, w, h = coco_to_voc_bbox_converter(y1, x1, y2, x2)
@@ -198,4 +209,5 @@ for video_id, video_dir in enumerate(video_directories):
                         format(w, '.2f'), format(h, '.2f'),
                         format(scores[prop_id], '.8f'))
                     f.write(things_to_write)
+            r = None
             print("")
