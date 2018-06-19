@@ -4,17 +4,27 @@ import cv2
 import threading
 import time
 import logging
+import matplotlib.pyplot as plt
 
 
 class Analysis:
-    def __init__(self, datasets_dir, ground_truth_filename, preds_dir=None, dataset_name=None):
+    def __init__(self, datasets_dir, ground_truth_filename, number_top, log_analysis,
+                    debug=True, record_none=False, heed_singles=False, preds_dir=None, dataset_name=None):
+
         self.datasets_dir = datasets_dir
         self.ground_truth_filename = ground_truth_filename
+        self.number_top = number_top
+        self.log_analysis = log_analysis
+        self.debug = debug
+        self.record_none = record_none
+        self.heed_singles = heed_singles
         self.preds_dir = preds_dir
         self.dataset_name = dataset_name
-        logging.basicConfig(filename='analysis_{}.log'.format(self.dataset_name),level=logging.DEBUG,
+
+        logging.basicConfig(filename=log_analysis+'analysis_{}.log'.format(self.dataset_name),level=logging.DEBUG,
                             format='%(levelname)s:%(asctime)s %(message)s', datefmt='%m/%d/%Y %I:%M:%S%p',
                             filemode='w')
+        logging.debug("Analysis Started")
 
     def video_player(self, show_pred_boxes=True, show_gt_boxes=True):
         """
@@ -66,52 +76,50 @@ class Analysis:
                 if(delay < 0.15):
                     time.sleep(0.15 - delay)
     
-    def false_alarm_plot(self):
-        pass
-
     def retreiver(self, duration, preds_all, gt_all, video_id, dict_ref):
         for frame_id in range(duration):
             if (frame_id%100 == 0) or (frame_id+1 == duration):
                 print("{}/{} is complete.".format(frame_id+1, duration))
-            preds = self.retreive_preds(preds_all, video_id, frame_id+1)
+            framewise_preds = self.retreive_preds(preds_all, video_id, frame_id+1)
             gt = gt_all[video_id][frame_id]
             iou_frame_all_pred = []
-            for pred in preds:
+            for pred in framewise_preds:
                 try:
-                    iou_for_pred = (self.iou(pred[1:5], gt[1:5]), pred[5])
+                    iou_for_pred = (self.iou(pred[1:5], gt[1:5]), *pred[5:])
                 except:
-                    iou_for_pred = (None, pred[5])
+                    iou_for_pred = (None, *pred[5:])
                 iou_frame_all_pred.append(iou_for_pred)
             # iou_frame_all_pred = sorted(iou_frame_all_pred, reverse=True)
             dict_ref.append(iou_frame_all_pred)
 
-    def tester(self, iou_thresholds=[0.25, 0.5, 0.75]):
+    def retreive_preds(self, preds, video_id, frame_id):
+        output = []
+        for pred_frame in preds[video_id]:
+            if pred_frame[0][0] == frame_id:
+                output.append(list(pred_frame[0]))
+        return output
+
+    def test1(self):
         """
-        
+        Testing for determining how many of the GT entries are described as nan.
+        E.g: When the object is not present in the scene.
+        Simply, the first coordinate x will be checked as nan or not.
         """
         video_names = os.listdir(self.datasets_dir)
         video_names = sorted(video_names)
         frame_lengths = [len(length) for length in self.image_reader()]
-        self.dict_iou = {video_name: [] for video_name in video_names}
-        
-        preds_all = self.pred_reader()
+
         gt_all = self.gt_reader()
 
-        if self.dataset_name == "VOT2018_LT_Subset" or self.dataset_name == "VOT2018_LT":
-            target_classes = {'bicycle': 1, 'car9': 3}
-
-        elif self.dataset_name == "VOT2016_Subset":
-            target_classes = {'ball1': 33, 'ball2': 33, 'basketball': 1, 'birds1': kus,
-                    'birds2': kus, 'bianket': 1, 'bmx': 1, 'bolt1': 1, 'bolt2'}
-
-        #############################################################################
+                #############################################################################
         ### TEST 1 
-        ### How many GT entries are defined as nan?
+        ### How many GT entries were annotated as nan?
         ### E.g: When the object is not present in the scene.
+        ### Simply, the first coordinate x will be checked as nan or not.
         #############################################################################
         logging.info("#############################################################################")
         logging.info("TEST 1: How many GT entries were annotated as nan?")
-        isnan_list = []
+        self.isnan_list = []
         for video_id, video_name in enumerate(video_names):
             nan_counter = 0
             frame_ids = []
@@ -119,11 +127,23 @@ class Analysis:
                 if np.isnan(gt_all[video_id][frame_id][1]):
                     frame_ids.append(frame_id)
                     nan_counter+=1
-            isnan_list.append(frame_ids)
+            self.isnan_list.append(frame_ids)
             logging.info("{}/{} frames were annotated as 'nan' in video: {}.".format(nan_counter,\
                     frame_lengths[video_id], video_name))
         logging.info("TEST 1 complete.")
         logging.info("#############################################################################")
+
+    def test2(self):
+        """
+        Finds how many of the predictions does not have any corresponding GT entries.
+        This definition will write to file on a class basis using isnan_list from self.test1().
+        In this case, self.test1() has to be called to create the self.isnan_list attrib.
+        """
+
+        video_names = os.listdir(self.datasets_dir)
+        video_names = sorted(video_names)
+        
+        preds_all = self.pred_reader()
 
         logging.info("#############################################################################")
         logging.info("TEST 2: For the frames where there is no GT defined, how many of "+\
@@ -143,15 +163,42 @@ class Analysis:
         pred_histogram_video = []
         for video_id, video_name in enumerate(video_names):
             preds_when_nan_valid = [0]*81
-            for pred_id, pred in enumerate(preds_all[video_id]):
-                for nan_frame_id in isnan_list[video_id]:
-                    if pred[0] == nan_frame_id:
-                        preds_when_nan_valid[pred[5]]+=1
+            for pred in preds_all[video_id]:
+                for nan_frame_id in self.isnan_list[video_id]:
+                    if pred[0][0] == nan_frame_id:
+                        preds_when_nan_valid[pred[0][5]]+=1
             pred_histogram_video.append(preds_when_nan_valid)
             logging.info("Video Name: {} {}".format(video_name, preds_when_nan_valid))
 
         logging.info("TEST 2 complete.")
         logging.info("#############################################################################")
+
+
+    def test3(self, analyse=[0.5]):
+        """
+        
+        """
+        video_names = os.listdir(self.datasets_dir)
+        video_names = sorted(video_names)
+        frame_lengths = [len(length) for length in self.image_reader()]
+        self.dict_iou = {video_name: [] for video_name in video_names}
+        
+        preds_all = self.pred_reader()
+        gt_all = self.gt_reader()
+
+        self.analyse = analyse
+
+        if self.dataset_name == "VOT2018_LT_Subset" or self.dataset_name == "VOT2018_LT":
+            target_classes = {'bicycle': 1, 'car9': 3}
+
+        elif self.dataset_name == "VOT2016_Subset" or self.dataset_name == "VOT2016_Subset_Subset":
+            target_classes = {'ball1': 33, 'ball2': 33, 'basketball': 1, 'birds1': 15,
+                    'birds2': 15, 'blanket': 1, 'bmx': 1, 'bolt1': 1, 'bolt2': 1, 'book': 74,
+                    'car1': 3, 'car2': 3, 'fernando': 16, 'girl': 1, 'graduate': 1, 'gymnastics1': 1, 
+                    'gymnastics2': 1, 'gymnastics3': 1, 'gymnastics4': 1, 'handball1': 1, 'handball2': 1,
+                    'iceskater1': 1, 'iceskater2': 1, 'motocross1': 4, 'motocross2': 4, 'nature': 15,
+                    'pedestrian1': 1, 'pedestrian2': 1, 'racing': 3, 'road': 4, 'sheep': 19, 'singer1': 1,
+                    'singer2': 1, 'soccer2': 1, 'traffic': 1, 'tunnel': 3, 'wiper': 3}
 
         threads = []
 
@@ -162,11 +209,13 @@ class Analysis:
             threads.append(t)
             logging.debug("IoU calculation process for '{}' has begun.".format(video_name))
 
+            # Alternative code is stated below but it will not create multiple processes.
+
             # for frame_id in range(frame_lengths[video_id]):
-            #     preds = self.retreive_preds(preds_all, video_id, frame_id+1)
+            #     framewise_preds = self.retreive_preds(preds_all, video_id, frame_id+1)
             #     gt = gt_all[video_id][frame_id]
             #     iou_frame_all_pred = []
-            #     for pred in preds:
+            #     for pred in framewise_preds:
             #         try:
             #             iou_for_pred = (self.iou(pred[1:5], gt[1:5]), pred[5])
             #         except:
@@ -190,95 +239,210 @@ class Analysis:
         #############################################################################
 
         logging.info("#############################################################################")
-        logging.info("TEST 3: Separation of bounding boxes as positive or negative based"+\
-                     "on their IoU's.")
+        logging.info("TEST 3: Assigning bboxes (+) or (-) based on if the prediction is true and"+\
+                     "True or False depending on the IoU being higher than a specified threshold.")
+
+        self.different_iou_video_based_conf = {video_name: np.zeros((len(analyse), 12)) for video_name in video_names}
+        self.all_videos_temporal_stats = {video_name: np.zeros((frame_lengths[video_id], 6)) for video_id, video_name in enumerate(video_names)}
 
         for video_id, video_name in enumerate(video_names):
-            # different_iou_video_based_conf = []
-            for iou_threshold in iou_thresholds:
-                iou_based_conf = []
+            for thr_id, iou_thr in enumerate(analyse):
                 counter_single_pred = 0
                 counter_multi_pred = 0
+
+                fp_single_type_none = 0
                 tp_single = 0
-                fn_single_1 = 0
-                fn_single_2 = 0
+                fn_single = 0
                 fp_single = 0
                 tn_single = 0
+                fp_multi_type_none = 0
                 tp_multi = 0
-                fp_multi = 0
                 fn_multi = 0
                 tn_multi = 0
-                for d, preds in enumerate(self.dict_iou[video_name]):
-                    conf_matrix_items = []
-                    if len(preds)==1:
+                fp_multi_1 = 0
+                fp_multi_2 = 0
+
+                for d, framewise_preds in enumerate(self.dict_iou[video_name]):
+                    tp_multi_temp = 0
+                    fn_multi_temp = 0
+                    tn_multi_temp = 0
+                    fp_multi_1_temp = 0
+                    fp_multi_2_temp = 0
+
+                    if len(framewise_preds)==1 and self.heed_singles:
                         counter_single_pred += 1
-                        if preds[0][0] == None:
-                            conf_matrix_items.append((d, "False", "Positive", 1))
-                            fn_single_1 += 1
-                            # logging.info((d, "False", "Negative", 1))
-                        elif preds[0][0]>iou_threshold:
-                            if preds[0][1]==target_classes[video_name]:
-                                conf_matrix_items.append((d, "True", "Positive"))
+                        if (framewise_preds[0][0] == None and self.record_none):
+                            fp_single_type_none += 1
+
+                        elif framewise_preds[0][0]>=iou_thr:
+                            if framewise_preds[0][1]==target_classes[video_name]:
                                 tp_single += 1
-                                # logging.info((d, "True", "Positive"))
+
                             else:
-                                conf_matrix_items.append((d, "False", "Positive", 1))
+                                fn_single += 1
+
+                        elif framewise_preds[0][0]<iou_thr:
+                            if framewise_preds[0][1]==target_classes[video_name]:
                                 fp_single += 1
-                                # logging.info((d, "False", "Positive", 1))
-                        elif preds[0][0]<iou_threshold:
-                            if preds[0][1]==target_classes[video_name]:
-                                conf_matrix_items.append((d, "True", "Negative", 1))
-                                tn_single += 1
-                                # logging.info((d, "True", "Negative", 1))
                             else:
-                                conf_matrix_items.append((d, "False", "Negative", 2))
-                                fn_single_2 += 1
-                                # logging.info((d, "False", "Negative", 2))
+                                tn_single += 1
                     
-                    elif len(preds)>1:
+                    elif len(framewise_preds)>1:
                         idx = []
-                        counter_multi_pred+=1
-                        for n, pred in enumerate(preds):
-                            if pred[0] == None:
-                                conf_matrix_items.append((d, "False", "Positive", 1))
-                                fn_multi += 1
-                                # logging.info((d, "False", "Negative", 1))
-                            # Obtain the indices which might be true positive bboxes
-                            elif pred[0]>iou_threshold:
+                        for n, pred in enumerate(framewise_preds):
+                            counter_multi_pred+=1
+
+                            if (pred[0] == None and self.record_none):
+                                fp_multi_type_none += 1
+
+                            elif pred[0]<iou_thr:
                                 if pred[1]==target_classes[video_name]:
-                                    idx.append(n)
+                                    fp_multi_1 += 1
+                                    fp_multi_1_temp += 1
+                                
+                                else:
+                                    tn_multi += 1
+                                    tn_multi_temp += 1
+
+                            # Obtain the indices which might be true positive bboxes
+                            elif pred[0]>=iou_thr:
+                                if pred[1]==target_classes[video_name]:
+                                    idx.append((n, pred[0]))
+
+                                else:
+                                    fn_multi += 1
+                                    fn_multi_temp += 1
+                                    
+                        idx = sorted(idx, key=lambda x: x[1], reverse=True)
                         
-                        for n, pred in enumerate(preds):
-                            counter=0
-                            if any(k==n for k in idx):
+                        counter = 0
+                        for n, pred in enumerate(framewise_preds):
+                            if any(k==n for k, iou in idx):
                                 if counter==0:
-                                    conf_matrix_items.append((d, "True", "Positive"))
                                     tp_multi += 1
-                                    # logging.info((d, "True", "Positive"))
+                                    tp_multi_temp += 1
                                     counter+=1
                                 else:
-                                    conf_matrix_items.append((d, "True", "Negative", 2))
-                                    tn_multi += 1
-                                    # logging.info((d, "True", "Negative", 2))
-                            else:
-                                conf_matrix_items.append((d, "False", "Positive", 2))
-                                fp_multi += 1
-                                # logging.info((d, "False", "Positive", 2))
+                                    fp_multi_2 += 1
+                                    fp_multi_2_temp += 1
 
-                    iou_based_conf.append(conf_matrix_items)
-                logging.info("VName: {} IOU: {} True Positives: {}".format(video_name, iou_threshold, tp_multi+tp_single))
-                logging.info("VName: {} IOU: {} True Negatives: {}".format(video_name, iou_threshold, tn_multi+tn_single))
-                logging.info("VName: {} IOU: {} False Positive: {}".format(video_name, iou_threshold, fp_multi+fp_single))
-                logging.info("VName: {} IOU: {} False Negatives: {}".format(video_name, iou_threshold, fn_single_1+fn_single_2+fn_multi))
+                    self.all_videos_temporal_stats[video_name][d] = d, tp_multi_temp, fp_multi_1_temp,\
+                            fp_multi_2_temp, fn_multi_temp, tn_multi_temp
 
-                # different_iou_video_based_conf.append(iou_based_conf)
                 
-            logging.info("Number of multiple predictions for {}: {}".format(video_name, counter_multi_pred))
-            logging.info("Number of single predictions for {}: {}".format(video_name, counter_single_pred))
-            logging.info("Total number of frames for {} is: {}".format(video_name, frame_lengths[video_id]))
+                if self.record_none:
+                    logging.info("VName: {}\tIOU: {}\tSingle Predictions FP from none GT: {}".format(video_name, iou_thr, fp_single_type_none))
+                    logging.info("VName: {}\tIOU: {}\tMulti Predictions FP from none GT: {}".format(video_name, iou_thr, fp_multi_type_none))
+
+                if self.heed_singles:
+                    logging.info("VName: {}\tIOU: {}\tSingle Predictions TP: {}".format(video_name, iou_thr, tp_single))
+                    logging.info("VName: {}\tIOU: {}\tSingle Predictions FP: {}".format(video_name, iou_thr, fp_single))
+                    logging.info("VName: {}\tIOU: {}\tSingle Predictions FN: {}".format(video_name, iou_thr, fn_single))
+                    logging.info("VName: {}\tIOU: {}\tSingle Predictions TN: {}".format(video_name, iou_thr, tn_single))
+
+                logging.info("VName: {}\tIOU: {}\tMulti Predictions TP: {}".format(video_name, iou_thr, tp_multi))
+                logging.info("VName: {}\tIOU: {}\tMulti Predictions FP Type I: {}".format(video_name, iou_thr, fp_multi_1))
+                logging.info("VName: {}\tIOU: {}\tMulti Predictions FP Type II: {}".format(video_name, iou_thr, fp_multi_2))
+                logging.info("VName: {}\tIOU: {}\tMulti Predictions FN: {}".format(video_name, iou_thr, fn_multi))
+                logging.info("VName: {}\tIOU: {}\tMulti Predictions TN: {}".format(video_name, iou_thr, tn_multi))
+                self.different_iou_video_based_conf[video_name][thr_id] = iou_thr, fp_single_type_none, fp_multi_type_none,\
+                                 tp_single, fp_single, fn_single, tn_single, tp_multi, fp_multi_1, fp_multi_2, fn_multi, tn_multi
+            logging.info("\t\t\t\tNumber of multiple predictions for {}: {}".format(video_name, counter_multi_pred))
+            logging.info("\t\t\t\tNumber of single predictions for {}: {}".format(video_name, counter_single_pred))
+            logging.info("\t\t\t\tTotal number of frames for {} is: {}".format(video_name, frame_lengths[video_id]))
+
         logging.info("TEST 3 complete.")
         logging.info("#############################################################################")
+    
+    def iouth_count_graph(self):
+        for video_name in self.different_iou_video_based_conf.keys():
+            iou_thr = self.different_iou_video_based_conf[video_name][:, 0]
+            features = self.different_iou_video_based_conf[video_name][:, 1:]
+            fig = plt.figure()
+            if self.record_none:
+                plt.plot(iou_thr, features[:, 0], label="FP Single w/ GT None")
+                plt.plot(iou_thr, features[:, 1], label="FP Multiple w/ GT None")
 
+            if self.heed_singles:
+                plt.plot(iou_thr, features[:, 2], label="TP Single")
+                plt.plot(iou_thr, features[:, 3], label="FP Single")
+                plt.plot(iou_thr, features[:, 4], label="FN Single")
+                plt.plot(iou_thr, features[:, 5], label="TN Single")
+
+            plt.plot(iou_thr, features[:, 6], label="TP Multiple")
+            plt.plot(iou_thr, features[:, 7], label="FP Multiple Type I")
+            plt.plot(iou_thr, features[:, 8], label="FP Multiple Type II")
+            plt.plot(iou_thr, features[:, 9], label="FN Multiple")
+            plt.plot(iou_thr, features[:, 10], label="TN Multiple")
+
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+            plt.suptitle("Test Statistics for {}".format(video_name))
+            plt.ylabel('Number of predictions satisfying the condition')
+            plt.xlabel('IoU Threshold')
+
+            plt.savefig(self.log_analysis+video_name+".jpg")
+
+    def frame_count_stats_pdf_graph(self):
+
+        assert len(self.analyse)==1
+
+        for video_name in self.all_videos_temporal_stats.keys():
+            frame_ids = self.all_videos_temporal_stats[video_name][:, 0]
+            tp_multi = self.all_videos_temporal_stats[video_name][:, 1]
+            fp_multi_1 = self.all_videos_temporal_stats[video_name][:, 2]
+            fp_multi_2 = self.all_videos_temporal_stats[video_name][:, 3]
+            fn_multi = self.all_videos_temporal_stats[video_name][:, 4]
+            tn_multi = self.all_videos_temporal_stats[video_name][:, 5]
+            
+            plt.figure()
+            plt.plot(frame_ids, tp_multi, label="TP Multiple")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+            plt.suptitle("TP Multiple for {}".format(video_name))
+            plt.ylabel('Number of predictions satisfying the condition')
+            plt.xlabel('# of frames')
+            plt.savefig(self.log_analysis+video_name+
+                "_temporal_pdf_tp_iou{}".format(self.analyse[0])+".jpg")
+            plt.close()
+
+            plt.figure()
+            plt.plot(frame_ids, fp_multi_1, label="FP Type I Multiple")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+            plt.suptitle("FP Type I Multiple for {}".format(video_name))
+            plt.ylabel('Number of predictions satisfying the condition')
+            plt.xlabel('# of frames')
+            plt.savefig(self.log_analysis+video_name+
+                "_temporal_pdf_fpt1_iou{}".format(self.analyse[0])+".jpg")
+            plt.close()
+
+            plt.figure()
+            plt.plot(frame_ids, fp_multi_2, label="FP Type II Multiple")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+            plt.suptitle("FP Type II Multiple for {}".format(video_name))
+            plt.ylabel('Number of predictions satisfying the condition')
+            plt.xlabel('# of frames')
+            plt.savefig(self.log_analysis+video_name+
+                "_temporal_pdf_fpt2_iou{}".format(self.analyse[0])+".jpg")
+            plt.close()
+
+            plt.figure()
+            plt.plot(frame_ids, fn_multi, label="FN Multiple")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+            plt.suptitle("FN Multiple for {}".format(video_name))
+            plt.ylabel('Number of predictions satisfying the condition')
+            plt.xlabel('# of frames')
+            plt.savefig(self.log_analysis+video_name+
+                "_temporal_pdf_fn_iou{}".format(self.analyse[0])+".jpg")
+            plt.close()
+
+            plt.figure()
+            plt.plot(frame_ids, tn_multi, label="TN Multiple")
+            plt.legend(bbox_to_anchor=(1.05, 1), loc=1, borderaxespad=0.)
+            plt.suptitle("TN Multiple for {}".format(video_name))
+            plt.ylabel('Number of predictions satisfying the condition')
+            plt.xlabel('# of frames')
+            plt.savefig(self.log_analysis+video_name+
+                "_temporal_pdf_tn_iou{}".format(self.analyse[0])+".jpg")        
+            plt.close()
 
     def iou(self, bbox1, bbox2):
         """
@@ -317,13 +481,6 @@ class Analysis:
             total_area = float(w1)*float(h1) + float(w2)*float(h2) - intersection_area
             iou = intersection_area/total_area
         return iou
-
-    def retreive_preds(self, preds, video_id, frame_id):
-        output = []
-        for pred_frame in preds[video_id]:
-            if pred_frame[0] == frame_id:
-                output.append(pred_frame)
-        return output
 
 
     def image_reader(self):
@@ -377,7 +534,7 @@ class Analysis:
                                         video, self.dataset_name))
                     video_gts.append(np.array([d+1, x, y, x+w, y+h], dtype=np.float32))
 
-            elif self.dataset_name == "VOT2016_Subset":
+            elif self.dataset_name == "VOT2016_Subset" or self.dataset_name == "VOT2016_Subset_Subset":
 
                 gt_path = os.path.join(self.datasets_dir, video, self.ground_truth_filename)
                 with open(gt_path, 'r') as f:
@@ -425,9 +582,23 @@ class Analysis:
             video_preds = []
             with open(pred_sample_path, 'r') as f:
                 temp_input_lines = f.read().split("\n")[:-1]
+            
+            #Handling the first line seen in result txt files with top-5 probs. 
+            if self.number_top == 5:
+                temp_input_lines = temp_input_lines[1:]
+
             for line in temp_input_lines:
-                fr_id, x, y, w, h, _, label = map(float, line.split("\t"))
-                video_preds.append(np.array([fr_id, x, y, x+w, y+h, label], dtype=np.int16))
+                if self.number_top == 1:
+                    fr_id, x, y, w, h, _, label = map(float, line.split("\t"))
+                    video_preds.append(np.array([fr_id, x, y, x+w, y+h, label], dtype=np.int16))
+                elif self.number_top == 5:
+                    fr_id, x, y, w, h, _, _, label1, prob1, label2, prob2, label3, prob3, label4,\
+                                        prob4, label5, prob5 = map(float, line.split("\t"))
+                    video_preds.append(np.array([(fr_id, x, y, x+w, y+h, label1, prob1, label2, 
+                                        prob2, label3, prob3, label4, prob4, label5, prob5)], 
+                                        dtype=[('', 'i4'),('', 'i4'),('', 'i4'),('', 'i4'),('', 'i4'),
+                                        ('', 'i4'),('', 'f4'),('', 'i4'),('', 'f4'),('', 'i4'),
+                                        ('', 'f4'),('', 'i4'),('', 'f4'),('', 'i4'),('', 'f4')]))
             preds_all.append(video_preds)
         return preds_all
         
@@ -441,11 +612,30 @@ class Analysis:
         return xmin, ymin, w, h
 
 if __name__ == "__main__":
+    # test-case -1
+    dataset_name = "VOT2016_Subset"
+    datasets_dir = "Datasets/"+dataset_name+"/"
+    ground_truth_file_name = "groundtruth.txt"
+    preds_dir = "logs/Evaluations/MASK_VOT2016_Subset_final_th0.01_top5prob/"
+    number_top = 5
+    log_analysis = "analysis/"
+    debug = False
+
+    # test-case 0
+    # dataset_name = "VOT2016_Subset_Subset"
+    # datasets_dir = "Datasets/"+dataset_name+"/"
+    # ground_truth_file_name = "groundtruth.txt"
+    # preds_dir = "logs/Evaluations/MASK_VOT2016_Subset_final_th0.01_top5prob/"
+    # number_top = 5
+    # log_analysis = "analysis/"
+    # debug = False
+
     # test-case 1
     # dataset_name = "VOT2016_Subset"
     # datasets_dir = "Datasets/"+dataset_name+"/"
     # ground_truth_file_name = "groundtruth.txt"
     # preds_dir = "logs/Evaluations/MASK_VOT2016_final_th0/"
+    # number_top = 1
 
     # test-case 2
     # dataset_name = "VOT2018_LT_Subset"
@@ -453,19 +643,28 @@ if __name__ == "__main__":
     # ground_truth_file_name = "groundtruth.txt"
     # preds_dir = "logs/Evaluations/MASK_VOT2018_Subsets/"+\
     #         "MASK_VOT2018_final_th0.01_detnms_th0.4/"
+    # number_top = 1
 
     # test-case 3
     # dataset_name = "VOT2018_LT"
     # datasets_dir = "Datasets/"+dataset_name+"/"
     # ground_truth_file_name = "groundtruth.txt"
     # preds_dir = "logs/Evaluations/MASK_VOT2018_final_th0.001/"
+    # number_top = 1
 
     # ozan case
-    dataset_name = "MSPR_Dataset"
-    datasets_dir = "Datasets/"+dataset_name+"/"
-    ground_truth_file_name = "groundtruth.txt"
+    # dataset_name = "MSPR_Dataset"
+    # datasets_dir = "Datasets/"+dataset_name+"/"
+    # ground_truth_file_name = "groundtruth.txt"
+    # number_top = 1
 
-    analise = Analysis(datasets_dir, ground_truth_file_name,
-                        dataset_name=dataset_name)
-    analise.video_player(show_pred_boxes=False)
-    # analise.tester()
+    analyse = Analysis(datasets_dir, ground_truth_file_name, number_top, log_analysis,
+                        debug=debug, preds_dir=preds_dir, dataset_name=dataset_name)
+    # analyse.video_player(show_pred_boxes=False)
+
+    # analyse.test1()
+    # analyse.test2()
+    # thr = list(np.arange(0.001, 1.001, 0.001))
+    # analyse.test3(analyse=thr)
+    analyse.test3(analyse=[0.5])
+    analyse.frame_count_stats_pdf_graph()
