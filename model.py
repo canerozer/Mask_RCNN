@@ -22,8 +22,10 @@ import keras.backend as K
 import keras.layers as KL
 import keras.engine as KE
 import keras.models as KM
+# from coco import evaluate_coco | ozan changed
 
 import utils
+import time
 
 # Requires TensorFlow 1.3+ and Keras 2.0.8+.
 from distutils.version import LooseVersion
@@ -798,10 +800,11 @@ class DetectionLayer(KE.Layer):
         # normalized coordinates
         return tf.reshape(
             detections_batch,
-            [self.config.BATCH_SIZE, self.config.DETECTION_MAX_INSTANCES, 87])
+            [self.config.BATCH_SIZE, self.config.DETECTION_MAX_INSTANCES, self.config.NUM_CLASSES+6])
 
     def compute_output_shape(self, input_shape):
-        return (None, self.config.DETECTION_MAX_INSTANCES, 87)
+        #return (None, self.config.DETECTION_MAX_INSTANCES, 87)
+        return (None, self.config.DETECTION_MAX_INSTANCES, self.config.NUM_CLASSES+6)
 
 
 ############################################################
@@ -1239,7 +1242,8 @@ def load_image_gt(dataset, config, image_id, augment=False, augmentation=None,
     # Active classes
     # Different datasets have different classes, so track the
     # classes supported in the dataset of this image.
-    active_class_ids = np.zeros([dataset.num_classes], dtype=np.int32)
+    #active_class_ids = np.zeros([dataset.num_classes], dtype=np.int32)
+    active_class_ids = np.zeros([config.NUM_CLASSES], dtype=np.int32)
     source_class_ids = dataset.source_class_ids[dataset.image_info[image_id]["source"]]
     active_class_ids[source_class_ids] = 1
 
@@ -2200,7 +2204,7 @@ class MaskRCNN():
         self.checkpoint_path = self.checkpoint_path.replace(
             "*epoch*", "{epoch:04d}")
 
-    def train(self, train_dataset, val_dataset, learning_rate, epochs, layers,
+    def train(self, train_dataset, val_dataset, learning_rate, epochs, layers, period,
               augmentation=None):
         """Train the model.
         train_dataset, val_dataset: Training and validation Dataset objects.
@@ -2255,9 +2259,13 @@ class MaskRCNN():
         callbacks = [
             keras.callbacks.TensorBoard(log_dir=self.log_dir,
                                         histogram_freq=0, write_graph=True, write_images=False),
-            keras.callbacks.ModelCheckpoint(self.checkpoint_path,
-                                            verbose=0, save_weights_only=True),
-        ]
+            keras.callbacks.ModelCheckpoint(self.checkpoint_path, period=period,
+                                            verbose=0, save_weights_only=True), 
+             ]
+             
+        #if validate is True:											 | ozan changed
+        #    callbacks.append(self.evaluate_coco(train_dataset, "bbox")) | ozan changed
+        #    callbacks.append(self.evaluate_coco(train_dataset, "segm")) | ozan changed
 
         # Train
         log("\nStarting at epoch {}. LR={}\n".format(self.epoch, learning_rate))
@@ -2623,6 +2631,64 @@ class MaskRCNN():
         for k, v in outputs_np.items():
             log(k, v)
         return outputs_np
+
+    def evaluate_coco(self, dataset, eval_type="bbox", limit=0, image_ids=None):
+        """Runs official COCO evaluation.
+        dataset: A Dataset object with valiadtion data
+        eval_type: "bbox" or "segm" for bounding box or segmentation evaluation
+        limit: if not 0, it's the number of images to use for evaluation
+        """
+        #
+        coco = dataset.load_coco("Datasets/coco/", "train", year=2014, 
+            return_coco=True, auto_download=False)
+        # Pick COCO images from the dataset
+        image_ids = image_ids or dataset.image_ids
+
+        # Limit to a subset
+        if limit:
+            image_ids = image_ids[:limit]
+
+        # Get corresponding COCO image IDs.
+        coco_image_ids = [dataset.image_info[id]["id"] for id in image_ids]
+
+        t_prediction = 0
+        t_start = time.time()
+
+        results = []
+        for i, image_id in enumerate(image_ids):
+            # Showing status of evaluation
+            if i%100 == 0 :
+                print("{} / {} is complete.".format(str(i), str(limit)))
+
+            # Load image
+            image = dataset.load_image(image_id)
+
+            # Run detection
+            t = time.time()
+            r = self.detect([image], verbose=0)[0]
+            t_prediction += (time.time() - t)
+
+            # Convert results to COCO format
+            image_results = build_coco_results(dataset, coco_image_ids[i:i + 1],
+                                           r["rois"], r["class_ids"],
+                                           r["scores"],
++                                          r["masks"].astype(np.uint8))
+            results.extend(image_results)
+
+        # Load results. This modifies results with additional attributes.
+        coco_results = coco.loadRes(results)
+
+        # Evaluate
+        cocoEval = COCOeval(coco, coco_results, eval_type)
+        cocoEval.params.imgIds = coco_image_ids
+        cocoEval.evaluate()
+        cocoEval.accumulate()
+        cocoEval.summarize()
+
+        print("Prediction time: {}. Average {}/image".format(
+            t_prediction, t_prediction / len(image_ids)))
+        print("Total time: ", time.time() - t_start)
+
 
 
 ############################################################
