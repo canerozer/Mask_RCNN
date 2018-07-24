@@ -84,13 +84,13 @@ class CocoConfig(Config):
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 1
 
-    STEPS_PER_EPOCH = 2000
+    STEPS_PER_EPOCH = 1000
 
     # Uncomment to train on 8 GPUs (default is 1)
     # GPU_COUNT = 8
 
     # Number of classes (including background)
-    NUM_CLASSES = 1 + 81  # COCO has 80 classes
+    NUM_CLASSES = 81 + 1  # COCO has 80 classes
 
 
 ############################################################
@@ -381,7 +381,8 @@ def evaluate_coco(model, dataset, coco, eval_type="bbox", limit=0, image_ids=Non
         # Convert results to COCO format
         image_results = build_coco_results(dataset, coco_image_ids[i:i + 1],
                                            r["rois"], r["class_ids"],
-                                           r["scores"], r["masks"])
+                                           r["scores"],
++                                          r["masks"].astype(np.uint8))
         results.extend(image_results)
 
     # Load results. This modifies results with additional attributes.
@@ -431,6 +432,10 @@ if __name__ == '__main__':
                         default=500,
                         metavar="<image count>",
                         help='Images to use for evaluation (default=500)')
+    parser.add_argument('--period', required=False,
+                        default=10,
+                        metavar="<period>",
+                        help="Period for writing the model file to the HDD.")
     parser.add_argument('--download', required=False,
                         default=False,
                         metavar="<True|False>",
@@ -453,8 +458,9 @@ if __name__ == '__main__':
             # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
             GPU_COUNT = 1
             IMAGES_PER_GPU = 1
-            DETECTION_MIN_CONFIDENCE = 0
+            DETECTION_MIN_CONFIDENCE = 0.7
             STEPS_PER_EPOCH = 2000
+            NUM_CLASSES = 81 + 1
         config = InferenceConfig()
     config.display()
 
@@ -502,24 +508,28 @@ if __name__ == '__main__':
         print("Training network heads")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=60,
-                    layers='heads')
+                    epochs=100,
+                    layers='heads',
+                    period=args.period)
+		# TO DO: Modify the validation setting etc
 
         # Training - Stage 2
         # Finetune layers from ResNet stage 4 and up
         print("Fine tune Resnet stage 4 and up")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=180,
-                    layers='4+')
+                    epochs=200,
+                    layers='4+',
+                    period=args.period)
 
         # Training - Stage 3
         # Fine tune all layers
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE / 10,
-                    epochs=220,
-                    layers='all')
+                    epochs=200,
+                    layers='all',
+                    period=args.period)
 
     elif args.command == "evaluate":
         # Validation dataset
@@ -529,13 +539,31 @@ if __name__ == '__main__':
         print("Running COCO evaluation on {} images.".format(args.limit))
         evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))
 
-    elif args.command == "evaluate_trainvstrain":
+    elif args.command == "evaluate_trainvstrain_bbox":
         # Validation dataset
         dataset_tvt = CocoDataset()
         coco = dataset_tvt.load_coco(args.dataset, "train", year=args.year, return_coco=True, auto_download=args.download)
         dataset_tvt.prepare()
         print("Running COCO evaluation on {} images.".format(int(args.limit)))
         evaluate_coco(model, dataset_tvt, coco, "bbox", limit=int(args.limit))
+
+    elif args.command == "evaluate_trainvstrain_segm":
+        # Validation dataset
+        dataset_tvt = CocoDataset()
+        coco = dataset_tvt.load_coco(args.dataset, "train", year=args.year, return_coco=True, auto_download=args.download)
+        dataset_tvt.prepare()
+        print("Running COCO evaluation on {} images.".format(int(args.limit)))
+        evaluate_coco(model, dataset_tvt, coco, "segm", limit=int(args.limit))
+
+    elif args.command == "evaluate_trainvstrain_cm":
+        # Confusion matrix calculation by using the training set
+        dataset_confusion = CocoDataset()
+        coco = dataset_confusion.load_coco(args.dataset, "train", year=args.year, return_coco=True, auto_download=args.download)
+        dataset_confusion.prepare()
+        gtruths, predictions, cfmatrix = utils.compute_cm(dataset_confusion, dataset_confusion.image_ids, 
+            dataset_confusion.class_names, args.model, config)
+        utils.plot_cfmatrix(cfmatrix)
+		
     else:
         print("'{}' is not recognized. "
               "Use 'train' or 'evaluate'".format(args.command))
