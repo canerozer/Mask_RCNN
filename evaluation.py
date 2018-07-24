@@ -1,5 +1,6 @@
 """
-Custom usage: python3 evaluation.py --test-dataset-dir="/media/dontgetdown/model_partition/UAV123/"
+Custom usage: python3 evaluation.py --test-dataset-dir="Datasets/VOT2016/"\
+--model-dir="logs/
 """
 
 import os
@@ -22,6 +23,9 @@ parser = argparse.ArgumentParser(description='Test some videos.')
 parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
                     default="/home/mspr/Datasets/test_dataset",
                     help='enter the test directory')
+parser.add_argument('--model-dir', metavar='MD', type=str,
+                    default=None,
+                    help='enter the test directory')
 
 args = parser.parse_args()
 
@@ -33,7 +37,9 @@ ROOT_DIR = os.getcwd()
 MODEL_DIR = os.path.join(ROOT_DIR, "logs")
 
 # Local path to trained weights file
-COCO_MODEL_PATH = os.path.join(ROOT_DIR, "mask_rcnn_coco.h5")
+assert args.model_dir is not None
+COCO_MODEL_PATH = args.model_dir
+
 # Download COCO trained weights from Releases if needed
 if not os.path.exists(COCO_MODEL_PATH):
     utils.download_trained_weights(COCO_MODEL_PATH)
@@ -56,7 +62,7 @@ class InferenceConfig(coco.CocoConfig):
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
-    NUM_CLASSES = 80 + 1
+    NUM_CLASSES = 81 + 1
     # RPN_NMS_THRESHOLD = 0.7   
     # DETECTION_NMS_THRESHOLD = 0.2
     DETECTION_MIN_CONFIDENCE = 0.01
@@ -89,7 +95,7 @@ class_names = ['BG', 'person', 'bicycle', 'car', 'motorcycle', 'airplane',
                'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote',
                'keyboard', 'cell phone', 'microwave', 'oven', 'toaster',
                'sink', 'refrigerator', 'book', 'clock', 'vase', 'scissors',
-               'teddy bear', 'hair drier', 'toothbrush']
+               'teddy bear', 'hair drier', 'toothbrush', 'face']
 
 
 def coco_to_voc_bbox_converter(y1, x1, y2, x2, roi_score):
@@ -156,7 +162,7 @@ for video_id, video_dir in enumerate(video_directories):
 
                     x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
                     things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
-                                      .format(d+1, x, y, w, h, format(score, '.8f'), 
+                                      .format(image_id[:-4], x, y, w, h, format(score, '.8f'), 
                                       predicted_class_id, p_c_ids[0],
                                     format(probs[0], '.8f'), p_c_ids[1],
                                     format(probs[1], '.8f'), p_c_ids[2],
@@ -166,11 +172,3 @@ for video_id, video_dir in enumerate(video_directories):
                     f.write(things_to_write)
 
                 print("")
-
-
-
-# Visualize results
-#print (image_id)
-#r = results[0]
-#visualize.display_instances(image, r['rois'], r['masks'], r['class_ids'],
-#                            class_names, r['scores'])
