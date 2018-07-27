@@ -20,6 +20,13 @@ import urllib.request
 import shutil
 import warnings
 
+import datetime
+import cv2
+from itertools import groupby
+from scipy.ndimage.morphology import binary_fill_holes
+from skimage import morphology
+
+
 # URL from which to download the latest COCO trained weights
 COCO_MODEL_URL = "https://github.com/matterport/Mask_RCNN/releases/download/v2.0/mask_rcnn_coco.h5"
 
@@ -930,15 +937,12 @@ def txt_bbox_parser(input_location):
         xywh.append(coco_bbox_creator(x, y))
     return image_nr, xywh
 
-# TO DO: CHOOSING THE LARGEST SEGMENT
-def biggest_segment(mask):
-    return mask
-
-def mask2poly(mask):
-    _, mask = cv2.threshold(mask,1,1,cv2.THRESH_BINARY)  #threshold binary image
-    mask = biggest_segment(mask)
-    kernel = np.ones((5,5),np.uint8)
-    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+def mask2poly(mask, modify):
+    _, mask = cv2.threshold(mask,1,1, cv2.THRESH_BINARY)  #threshold binary image
+    if modify:
+        mask = binary_fill_holes(mask)
+        mask = morphology.remove_small_objects(mask, min_size=60)
+    mask = np.array(mask, np.uint8)
     _,countours,_ = cv2.findContours(mask, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     polygons = []
     for countour in countours:
