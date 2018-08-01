@@ -51,6 +51,8 @@ import model as modellib
 import tensorflow as tf
 import keras.backend as K
 
+from tensorflow.python import debug as tf_debug
+
 # Root directory of the project
 ROOT_DIR = os.getcwd()
 
@@ -63,9 +65,9 @@ DEFAULT_LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 DEFAULT_DATASET_YEAR = "2014"
 
 # An attempt for resolving GPU memory glitch
-config2 = tf.ConfigProto()
-config2.gpu_options.allow_growth = True
-K.set_session(tf.Session(config=config2))
+#config2 = tf.ConfigProto()
+#config2.gpu_options.allow_growth = True
+#K.set_session(tf.Session(config=config2))
 
 ############################################################
 #  Configurations
@@ -83,6 +85,7 @@ class CocoConfig(Config):
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
     IMAGES_PER_GPU = 1
+    #IMAGES_PER_GPU = 2
 
     STEPS_PER_EPOCH = 1000
 
@@ -92,6 +95,13 @@ class CocoConfig(Config):
     # Number of classes (including background)
     NUM_CLASSES = 1 + 1  # COCO has 80 classes
 
+    LEARNING_RATE = 0.00125
+    #LEARNING_RATE = 0.00125 * 2 # when BS=2
+
+    INIT_BN = False
+    INIT_GN = True
+    TRAIN_GN = False  # Group Normalization Training Option
+    TRAIN_BN = False    
 
 ############################################################
 #  Dataset
@@ -432,7 +442,7 @@ if __name__ == '__main__':
                         default=500,
                         metavar="<image count>",
                         help='Images to use for evaluation (default=500)')
-    parser.add_argument('--period', required=False,
+    parser.add_argument('--period', required=False, type=int,
                         default=10,
                         metavar="<period>",
                         help="Period for writing the model file to the HDD.")
@@ -441,14 +451,28 @@ if __name__ == '__main__':
                         metavar="<True|False>",
                         help='Automatically download and unzip MS-COCO files (default=False)',
                         type=bool)
+    parser.add_argument('--debug',
+                        default=False,
+                        metavar="D",
+                        help='Performs debugging on the graph on localhost:6007',
+                        type=bool)
     args = parser.parse_args()
     print("Command: ", args.command)
     print("Model: ", args.model)
     print("Dataset: ", args.dataset)
     print("Year: ", args.year)
     print("Logs: ", args.logs)
+    print("Limit: ", args.limit)
+    print("Period: ", args.period)
     print("Auto Download: ", args.download)
+    print("Debug: ", args.debug)
 
+    if args.debug:
+        config2 = tf.ConfigProto()
+        config2.gpu_options.allow_growth = True
+        K.set_session(
+            tf_debug.LocalCLIDebugWrapperSession(tf.Session(), 
+                                                 "DGD:6007"))
     # Configurations
     if args.command == "train":
         config = CocoConfig()
@@ -460,7 +484,7 @@ if __name__ == '__main__':
             IMAGES_PER_GPU = 1
             DETECTION_MIN_CONFIDENCE = 0.7
             STEPS_PER_EPOCH = 2000
-            NUM_CLASSES = 81 + 1
+            NUM_CLASSES = 1 + 1
         config = InferenceConfig()
     config.display()
 
@@ -508,26 +532,26 @@ if __name__ == '__main__':
         print("Training network heads")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=100,
+                    epochs=20,
                     layers='heads',
                     period=args.period)
 		# TO DO: Modify the validation setting etc
 
         # Training - Stage 2
         # Finetune layers from ResNet stage 4 and up
-        print("Fine tune Resnet stage 4 and up")
-        model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE,
-                    epochs=300,
-                    layers='4+',
-                    period=args.period)
+        #print("Fine tune Resnet stage 4 and up")
+        #model.train(dataset_train, dataset_val,
+        #            learning_rate=config.LEARNING_RATE,
+        #            epochs=20,
+        #            layers='4+',
+        #            period=args.period)
 
         # Training - Stage 3
         # Fine tune all layers
         print("Fine tune all layers")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE / 10,
-                    epochs=500,
+                    epochs=40,
                     layers='all',
                     period=args.period)
 

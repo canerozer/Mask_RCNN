@@ -62,10 +62,14 @@ class InferenceConfig(coco.CocoConfig):
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
-    NUM_CLASSES = 81 + 1
+    NUM_CLASSES = 1 + 1
     # RPN_NMS_THRESHOLD = 0.7   
     # DETECTION_NMS_THRESHOLD = 0.2
     DETECTION_MIN_CONFIDENCE = 0.01
+
+    INIT_BN = False    
+    INIT_GN = True
+    TRAIN_GN = False  # Group Normalization Training Option
 
 config = InferenceConfig()
 config.display()
@@ -153,12 +157,18 @@ for video_id, video_dir in enumerate(video_directories):
                     y1, x1, y2, x2 = r['rois'][score_id]
                     obj_score = r['scores'][score_id]
                     predicted_class_id = r['class_ids'][score_id]
-
                     # Max top-5 probabilities
                     probs = -np.sort(-r['logits'][score_id])[:5]
 
                     # Arguments of top-5
                     p_c_ids = np.argsort(-r['logits'][score_id])[:5]
+
+                    # When # of classes are less than 5
+                    if config.NUM_CLASSES < 5:
+                        diff = 5 - config.NUM_CLASSES
+                        predicted_class_id = np.pad(predicted_class_id, (0,diff), 'constant', constant_values=0)
+                        probs = np.pad(probs, (0,diff), 'constant', constant_values=0)
+                        p_c_ids = np.pad(p_c_ids, (0,diff), 'constant', constant_values=0)
 
                     x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
                     things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\

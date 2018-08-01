@@ -185,10 +185,16 @@ class Config(object):
     #     False: Freeze BN or GN layers. Good when using a small batch size
     #     True: (don't use). Set layer in training mode even when inferencing
     TRAIN_BN = False  # Defaulting to False since batch size is often small
-    TRAIN_GN = False  # Group Normalization Option while disregarding BN layers
 
     # Gradient norm clipping
     GRADIENT_CLIP_NORM = 5.0
+
+    # Customization by Caner Ozer
+    INIT_BN = True    
+    INIT_GN = False
+    TRAIN_GN = False  # Group Normalization Training Option
+    USE_BOTTOM_UP_AUG = False # Bottom-up augumentation proposed in 
+                              # arXiv: 1803.01534
 
     def __init__(self):
         """Set values of computed attributes."""

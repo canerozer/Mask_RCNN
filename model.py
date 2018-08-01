@@ -115,7 +115,7 @@ class GroupNormalization(Layer):
     """
 
     def __init__(self,
-                 groups=32,
+                 groups=16,
                  axis=-1,
                  epsilon=1e-5,
                  center=True,
@@ -126,6 +126,7 @@ class GroupNormalization(Layer):
                  gamma_regularizer=None,
                  beta_constraint=None,
                  gamma_constraint=None,
+                 trainable=None,
                  **kwargs):
         super(GroupNormalization, self).__init__(**kwargs)
         self.supports_masking = True
@@ -140,8 +141,9 @@ class GroupNormalization(Layer):
         self.gamma_regularizer = regularizers.get(gamma_regularizer)
         self.beta_constraint = constraints.get(beta_constraint)
         self.gamma_constraint = constraints.get(gamma_constraint)
+        self.trainable = trainable
 
-    def build(self, input_shape):
+    def build(self, input_shape, trainable):
         dim = input_shape[self.axis]
 
         if dim is None:
@@ -169,7 +171,8 @@ class GroupNormalization(Layer):
                                          name='gamma',
                                          initializer=self.gamma_initializer,
                                          regularizer=self.gamma_regularizer,
-                                         constraint=self.gamma_constraint)
+                                         constraint=self.gamma_constraint,
+                                         trainable=trainable)
         else:
             self.gamma = None
         if self.center:
@@ -177,7 +180,8 @@ class GroupNormalization(Layer):
                                         name='beta',
                                         initializer=self.beta_initializer,
                                         regularizer=self.beta_regularizer,
-                                        constraint=self.beta_constraint)
+                                        constraint=self.beta_constraint,
+                                        trainable=trainable)
         else:
             self.beta = None
         self.built = True
@@ -252,14 +256,23 @@ class GroupNorm(GroupNormalization):
     """Group Normalization still performs well when the model is trained with
     low batch sizes. Can be activated via the config class.
     """
-    def call(self, inputs, training=None):
+    def __init__(self, name=None, training=None):
+        super(GroupNorm, self).__init__()
+        self.trainable = training
+
+    def call(self, inputs):
         """
         Note about training values:
             None: Train GN layers. This is the normal mode
             False: Freeze GN layers. Good when batch size is small
             True: Train GN layers
         """
-        return super(self.__class__, self).call(inputs, training=training)
+        return super(self.__class__, self).call(inputs)
+
+
+    def build(self, inputs, trainable=None):
+        return super(self.__class__, self).build(inputs, self.trainable)
+
 
 
 def compute_backbone_shapes(config, image_shape):
@@ -284,7 +297,8 @@ def compute_backbone_shapes(config, image_shape):
 # https://github.com/fchollet/deep-learning-models/blob/master/resnet50.py
 
 def identity_block(input_tensor, kernel_size, filters, stage, block,
-                   use_bias=True, train_bn=True, train_gn=True):
+                   use_bias=True, train_bn=True, train_gn=True,
+                   init_bn=True, init_gn=False):
     """The identity_block is the block that has no conv layer at shortcut
     # Arguments
         input_tensor: input tensor
@@ -302,26 +316,26 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 
     x = KL.Conv2D(nb_filter1, (1, 1), name=conv_name_base + '2a',
                   use_bias=use_bias)(input_tensor)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name=bn_name_base + '2a')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name=gn_name_base + '2a')(x, training=train_gn)
+    if init_gn:
+        x = GroupNorm(name=gn_name_base + '2a', training=train_gn)(x)
     x = KL.Activation('relu')(x)
 
     x = KL.Conv2D(nb_filter2, (kernel_size, kernel_size), padding='same',
                   name=conv_name_base + '2b', use_bias=use_bias)(x)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name=bn_name_base + '2b')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name=gn_name_base + '2b')(x, training=train_gn)
+    if init_gn:
+        x = GroupNorm(name=gn_name_base + '2b', training=train_gn)(x)
     x = KL.Activation('relu')(x)
 
     x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base + '2c',
                   use_bias=use_bias)(x)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name=bn_name_base + '2c')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name=gn_name_base + '2c')(x, training=train_gn)
+    if init_gn:
+        x = GroupNorm(name=gn_name_base + '2c', training=train_gn)(x)
 
     x = KL.Add()([x, input_tensor])
     x = KL.Activation('relu', name='res' + str(stage) + block + '_out')(x)
@@ -330,7 +344,7 @@ def identity_block(input_tensor, kernel_size, filters, stage, block,
 
 def conv_block(input_tensor, kernel_size, filters, stage, block,
                strides=(2, 2), use_bias=True, train_bn=True,
-               train_gn=True):
+               train_gn=True, init_bn=True, init_gn=False):
     """conv_block is the block that has a conv layer at shortcut
     # Arguments
         input_tensor: input tensor
@@ -350,40 +364,41 @@ def conv_block(input_tensor, kernel_size, filters, stage, block,
 
     x = KL.Conv2D(nb_filter1, (1, 1), strides=strides,
                   name=conv_name_base + '2a', use_bias=use_bias)(input_tensor)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name=bn_name_base + '2a')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name=gn_name_base + '2a')(x, training=train_gn)
+    if init_gn:
+        x = GroupNorm(name=gn_name_base + '2a', training=train_gn)(x)
     x = KL.Activation('relu')(x)
 
     x = KL.Conv2D(nb_filter2, (kernel_size, kernel_size), padding='same',
                   name=conv_name_base + '2b', use_bias=use_bias)(x)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name=bn_name_base + '2b')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name=gn_name_base + '2b')(x, training=train_gn)
+    if init_gn:
+        x = GroupNorm(name=gn_name_base + '2b', training=train_gn)(x)
     x = KL.Activation('relu')(x)
 
     x = KL.Conv2D(nb_filter3, (1, 1), name=conv_name_base +
                   '2c', use_bias=use_bias)(x)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name=bn_name_base + '2c')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name=gn_name_base + '2c')(x, training=train_gn)
+    if init_gn:
+        x = GroupNorm(name=gn_name_base + '2c', training=train_gn)(x)
 
     shortcut = KL.Conv2D(nb_filter3, (1, 1), strides=strides,
                          name=conv_name_base + '1', use_bias=use_bias)(input_tensor)
-    if train_gn is not True:
+    if init_bn:
         shortcut = BatchNorm(name=bn_name_base + '1')(shortcut, training=train_bn)
-    if train_gn is True:
-        shortcut = GroupNorm(name=gn_name_base + '1')(shortcut, training=train_gn)
+    if init_gn:
+        shortcut = GroupNorm(name=gn_name_base + '1', training=train_gn)(shortcut)
 
     x = KL.Add()([x, shortcut])
     x = KL.Activation('relu', name='res' + str(stage) + block + '_out')(x)
     return x
 
 
-def resnet_graph(input_image, architecture, stage5=False, train_bn=True, train_gn=True):
+def resnet_graph(input_image, architecture, stage5=False, train_bn=False, train_gn=False,
+                 init_bn=True, init_gn=False):
     """Build a ResNet graph.
         architecture: Can be resnet50 or resnet101
         stage5: Boolean. If False, stage5 of the network is not created
@@ -393,32 +408,34 @@ def resnet_graph(input_image, architecture, stage5=False, train_bn=True, train_g
     # Stage 1
     x = KL.ZeroPadding2D((3, 3))(input_image)
     x = KL.Conv2D(64, (7, 7), strides=(2, 2), name='conv1', use_bias=True)(x)
-    if train_gn is not True:
+    if init_bn:
         x = BatchNorm(name='bn_conv1')(x, training=train_bn)
-    if train_gn is True:
-        x = GroupNorm(name='gn_conv1')(x, training=train_gn)
+        print("BN Initialized")
+    if init_gn:
+        x = GroupNorm(name='gn_conv1', training=train_gn)(x)
     x = KL.Activation('relu')(x)
     C1 = x = KL.MaxPooling2D((3, 3), strides=(2, 2), padding="same")(x)
     # Stage 2
-    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1), train_bn=train_bn, train_gn=train_gn)
-    x = identity_block(x, 3, [64, 64, 256], stage=2, block='b', train_bn=train_bn, train_gn=train_gn)
-    C2 = x = identity_block(x, 3, [64, 64, 256], stage=2, block='c', train_bn=train_bn, train_gn=train_gn)
+    x = conv_block(x, 3, [64, 64, 256], stage=2, block='a', strides=(1, 1), train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
+    x = identity_block(x, 3, [64, 64, 256], stage=2, block='b', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
+    C2 = x = identity_block(x, 3, [64, 64, 256], stage=2, block='c', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
     # Stage 3
-    x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', train_bn=train_bn, train_gn=train_gn)
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='b', train_bn=train_bn, train_gn=train_gn)
-    x = identity_block(x, 3, [128, 128, 512], stage=3, block='c', train_bn=train_bn, train_gn=train_gn)
-    C3 = x = identity_block(x, 3, [128, 128, 512], stage=3, block='d', train_bn=train_bn, train_gn=train_gn)
+    x = conv_block(x, 3, [128, 128, 512], stage=3, block='a', train_bn=train_bn, train_gn=train_gn,
+                   init_bn=init_bn, init_gn=init_gn)
+    x = identity_block(x, 3, [128, 128, 512], stage=3, block='b', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
+    x = identity_block(x, 3, [128, 128, 512], stage=3, block='c', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
+    C3 = x = identity_block(x, 3, [128, 128, 512], stage=3, block='d', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
     # Stage 4
-    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', train_bn=train_bn, train_gn=train_gn)
+    x = conv_block(x, 3, [256, 256, 1024], stage=4, block='a', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
     block_count = {"resnet50": 5, "resnet101": 22}[architecture]
     for i in range(block_count):
-        x = identity_block(x, 3, [256, 256, 1024], stage=4, block=chr(98 + i), train_bn=train_bn, train_gn=train_gn)
+        x = identity_block(x, 3, [256, 256, 1024], stage=4, block=chr(98 + i), train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
     C4 = x
     # Stage 5
     if stage5:
-        x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', train_bn=train_bn, train_gn=train_gn)
-        x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b', train_bn=train_bn, train_gn=train_gn)
-        C5 = x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', train_bn=train_bn, train_gn=train_gn)
+        x = conv_block(x, 3, [512, 512, 2048], stage=5, block='a', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
+        x = identity_block(x, 3, [512, 512, 2048], stage=5, block='b', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
+        C5 = x = identity_block(x, 3, [512, 512, 2048], stage=5, block='c', train_bn=train_bn, train_gn=train_gn, init_bn=init_bn, init_gn=init_gn)
     else:
         C5 = None
     return [C1, C2, C3, C4, C5]
@@ -1100,7 +1117,8 @@ def build_rpn_model(anchor_stride, anchors_per_location, depth):
 
 def fpn_classifier_graph(rois, feature_maps, image_meta,
                          pool_size, num_classes, train_bn=True,
-                         train_gn=True):
+                         train_gn=True, init_gn=False,
+                         init_bn=True):
     """Builds the computation graph of the feature pyramid network classifier
     and regressor heads.
     rois: [batch, num_rois, (y1, x1, y2, x2)] Proposal boxes in normalized
@@ -1124,17 +1142,17 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
     # Two 1024 FC layers (implemented with Conv2D for consistency)
     x = KL.TimeDistributed(KL.Conv2D(1024, (pool_size, pool_size), padding="valid"),
                            name="mrcnn_class_conv1")(x)
-    if train_gn is not True:
+    if init_bn:
         x = KL.TimeDistributed(BatchNorm(), name='mrcnn_class_bn1')(x, training=train_bn)
-    if train_gn is True:
-        x = KL.TimeDistributed(GroupNorm(), name='mrcnn_class_gn1')(x, training=train_gn)
+    if init_gn:
+        x = KL.TimeDistributed(GroupNorm(name='mrcnn_class_gn1', training=train_gn))(x)
     x = KL.Activation('relu')(x)
     x = KL.TimeDistributed(KL.Conv2D(1024, (1, 1)),
                            name="mrcnn_class_conv2")(x)
-    if train_gn is not True:
+    if init_bn:
         x = KL.TimeDistributed(BatchNorm(), name='mrcnn_class_bn2')(x, training=train_bn)
-    if train_gn is True:
-        x = KL.TimeDistributed(GroupNorm(), name='mrcnn_class_gn2')(x, training=train_gn)
+    if init_gn:
+        x = KL.TimeDistributed(GroupNorm(name='mrcnn_class_gn2', training=train_gn))(x)
     x = KL.Activation('relu')(x)
 
     shared = KL.Lambda(lambda x: K.squeeze(K.squeeze(x, 3), 2),
@@ -1159,7 +1177,8 @@ def fpn_classifier_graph(rois, feature_maps, image_meta,
 
 def build_fpn_mask_graph(rois, feature_maps, image_meta,
                          pool_size, num_classes, train_bn=True,
-                         train_gn=True):
+                         train_gn=True, init_bn=True,
+                         init_gn=False):
     """Builds the computation graph of the mask head of Feature Pyramid Network.
     rois: [batch, num_rois, (y1, x1, y2, x2)] Proposal boxes in normalized
           coordinates.
@@ -1179,42 +1198,42 @@ def build_fpn_mask_graph(rois, feature_maps, image_meta,
     # Conv layers
     x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
                            name="mrcnn_mask_conv1")(x)
-    if train_gn is not True:
+    if init_bn:
         x = KL.TimeDistributed(BatchNorm(),
                            name='mrcnn_mask_bn1')(x, training=train_bn)
-    if train_gn is True:
-        x = KL.TimeDistributed(GroupNorm(),
-                           name='mrcnn_mask_gn1')(x, training=train_gn)
+    if init_gn:
+        x = KL.TimeDistributed(GroupNorm(name='mrcnn_mask_gn1',
+                                         training=train_gn))(x)
     x = KL.Activation('relu')(x)
 
     x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
                            name="mrcnn_mask_conv2")(x)
-    if train_gn is not True:
+    if init_bn:
         x = KL.TimeDistributed(BatchNorm(),
                            name='mrcnn_mask_bn2')(x, training=train_bn)
-    if train_gn is True:
-        x = KL.TimeDistributed(GroupNorm(),
-                           name='mrcnn_mask_gn2')(x, training=train_gn)
+    if init_gn:
+        x = KL.TimeDistributed(GroupNorm(name='mrcnn_mask_gn2',
+                                         training=train_gn))(x)
     x = KL.Activation('relu')(x)
 
     x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
                            name="mrcnn_mask_conv3")(x)
-    if train_gn is not True:
+    if init_bn:
         x = KL.TimeDistributed(BatchNorm(),
                            name='mrcnn_mask_bn3')(x, training=train_bn)
-    if train_gn is True:
-        x = KL.TimeDistributed(GroupNorm(),
-                           name='mrcnn_mask_gn3')(x, training=train_gn)
+    if init_gn:
+        x = KL.TimeDistributed(GroupNorm(name='mrcnn_mask_gn3',
+                                         training=train_gn))(x)
     x = KL.Activation('relu')(x)
 
     x = KL.TimeDistributed(KL.Conv2D(256, (3, 3), padding="same"),
                            name="mrcnn_mask_conv4")(x)
-    if train_gn is not True:
+    if init_bn:
         x = KL.TimeDistributed(BatchNorm(),
                            name='mrcnn_mask_bn4')(x, training=train_bn)
-    if train_gn is True:
-        x = KL.TimeDistributed(GroupNorm(),
-                           name='mrcnn_mask_gn4')(x, training=train_gn)
+    if init_gn:
+        x = KL.TimeDistributed(GroupNorm(name='mrcnn_mask_gn4',
+                                         training=train_gn))(x)
     x = KL.Activation('relu')(x)
 
     x = KL.TimeDistributed(KL.Conv2DTranspose(256, (2, 2), strides=2, activation="relu"),
@@ -2090,7 +2109,9 @@ class MaskRCNN():
         # Don't create the thead (stage 5), so we pick the 4th item in the list.
         _, C2, C3, C4, C5 = resnet_graph(input_image, config.BACKBONE,
                                          stage5=True, train_bn=config.TRAIN_BN,
-                                         train_gn=config.TRAIN_GN)
+                                         train_gn=config.TRAIN_GN,
+                                         init_bn=config.INIT_BN,
+                                         init_gn=config.INIT_GN)
         # Top-down Layers
         # TODO: add assert to varify feature map sizes match what's in config
         P5 = KL.Conv2D(256, (1, 1), name='fpn_c5p5')(C5)
@@ -2116,6 +2137,26 @@ class MaskRCNN():
         rpn_feature_maps = [P2, P3, P4, P5, P6]
         mrcnn_feature_maps = [P2, P3, P4, P5]
 
+        ############## WIP ##############
+        # Bottom-up implementation proposed in arXiv:1803.01534
+        # TODO: Use convolutions on the second argument of 
+        # KL.Add() if the results are not satisfactory.
+        # Requires a GPU having DRAM more than 8 GB's with 
+        # batch size 1.
+        ############## WIP ##############
+        #if config.USE_BOTTOM_UP_AUG:
+        #    N2 = P2
+        #    N3 = KL.Add(name="buaug_n3add")([
+        #        KL.MaxPooling2D(name="buaug_n2_ds")(N2), P3])
+        #    N4 = KL.Add(name="buaug_n4add")([
+        #        KL.MaxPooling2D(name="buaug_n3_ds")(N3), P4])
+        #    N5 = KL.Add(name="buaug_n5add")([
+        #        KL.MaxPooling2D(name="buaug_n4_ds")(N4), P5])
+        #    N6 = KL.Add(name="buaug_n6add")([
+        #        KL.MaxPooling2D(name="buaug_n5_ds")(N5), P6])
+        #    rpn_feature_maps = [N2, N3, N4, N5, N6]
+        #    mrcnn_feature_maps = [N2, N3, N4, N5]
+                
         # Anchors
         if mode == "training":
             anchors = self.get_anchors(config.IMAGE_SHAPE)
@@ -2187,14 +2228,18 @@ class MaskRCNN():
                 fpn_classifier_graph(rois, mrcnn_feature_maps, input_image_meta,
                                      config.POOL_SIZE, config.NUM_CLASSES,
                                      train_bn=config.TRAIN_BN,
-                                     train_gn=config.TRAIN_GN)
+                                     train_gn=config.TRAIN_GN,
+                                     init_bn=config.INIT_BN,
+                                     init_gn=config.INIT_GN)
 
             mrcnn_mask = build_fpn_mask_graph(rois, mrcnn_feature_maps,
                                               input_image_meta,
                                               config.MASK_POOL_SIZE,
                                               config.NUM_CLASSES,
                                               train_bn=config.TRAIN_BN,
-                                              train_gn=config.TRAIN_GN)
+                                              train_gn=config.TRAIN_GN,
+                                              init_bn=config.INIT_BN,
+                                              init_gn=config.INIT_GN)
 
             # TODO: clean up (use tf.identify if necessary)
             output_rois = KL.Lambda(lambda x: x * 1, name="output_rois")(rois)
@@ -2522,6 +2567,8 @@ class MaskRCNN():
         log("Checkpoint Path: {}".format(self.checkpoint_path))
         self.set_trainable(layers)
         self.compile(learning_rate, self.config.LEARNING_MOMENTUM)
+        
+        self.keras_model.summary()
 
         # Work-around for Windows: Keras fails on Windows when using
         # multiprocessing workers. See discussion here:

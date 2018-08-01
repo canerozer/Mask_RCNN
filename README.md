@@ -1,18 +1,13 @@
-# How To Run (Training)
-python3 coco.py train --dataset=Datasets/coco/ --model=imagenet --logs=logs/
-python3 coco.py train --dataset=Datasets/coco/ --model=last --logs=logs/
+# Differences From the Master Branch
 
-# How To Run (Train vs. Train)
-python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=/media/dontgetdown/model_partition/logs/coco20171231T0137/mask_rcnn_coco_0160.h5
+A baseline code for expanding the MS COCO Dataset with your own data was added. In addition, Group Normalization layers can be initialized instead of using Batch Normalization layers. Then, learning rate parameter was modified to 0.0025 for a batch size of 2.
+Lastly, bottom-up path augmentations were implemented, however not been tested due to the complexity and OOM issues. Related works can be found below:
 
-# How To Run (Train vs. Train) on Provided Model
-python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=mask_rcnn_coco.h5
+[Group Normalization] --> https://arxiv.org/pdf/1803.08494.pdf
+[PANet] --> https://arxiv.org/pdf/1803.01534.pdf
+For batch size scheduling --> https://arxiv.org/pdf/1706.02677.pdf
+For bottom-up path aug --> https://arxiv.org/pdf/1803.01534.pdf
 
-# How To Run TensorBoard using the logs directory
-tensorboard --logdir=run1:logs/coco2018... --port 6006
-
-# How To Convert From Semiautomatic LabelMe Format to MS COCO JSON?
-Refer to the inspect_json.ipynb guideline. 
 
 # Mask R-CNN for Object Detection and Segmentation
 
@@ -205,3 +200,19 @@ If you use Docker, the code has been verified to work on
 ## More Examples
 ![Sheep](assets/sheep.png)
 ![Donuts](assets/donuts.png)
+
+# How To Run (Training)
+python3 coco.py train --dataset=Datasets/coco/ --model=imagenet --logs=logs/
+python3 coco.py train --dataset=Datasets/coco/ --model=last --logs=logs/
+
+# How To Run (Train vs. Train)
+python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=/media/dontgetdown/model_partition/logs/coco20171231T0137/mask_rcnn_coco_0160.h5
+
+# How To Run (Train vs. Train) on Provided Model
+python3 coco.py evaluate_trainvstrain --dataset=data/coco_train/ --model=mask_rcnn_coco.h5
+
+# How To Run TensorBoard using the logs directory
+tensorboard --logdir=run1:logs/coco2018... --port 6006
+
+# How To Convert From Semiautomatic LabelMe Format to MS COCO JSON?
+Refer to the inspect_json.ipynb guideline. 
