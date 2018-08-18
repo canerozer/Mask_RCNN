@@ -1,12 +1,12 @@
-# Differences From the Master Branch
+# Differences From the Original Branch
 
-A baseline code for expanding the MS COCO Dataset with your own data was added. In addition, Group Normalization layers can be initialized instead of using Batch Normalization layers. Then, learning rate parameter was modified to 0.0025 for a batch size of 2.
-Lastly, bottom-up path augmentations were implemented, however not been tested due to the complexity and OOM issues. Related works can be found below:
+A baseline code for expanding the MS COCO Dataset with your own data was added. In addition, Group Normalization layers can be initialized instead of using Batch Normalization layers [1]. Then, learning rate parameter was modified to 0.025 for a batch size of 2 [3]. Lastly, shortcut connections, mask fusion architecture and bottom-up path augmentations were implemented; however, bottom-up augmentations were not tested due to OOM issues [2].  
 
-[Group Normalization] --> https://arxiv.org/pdf/1803.08494.pdf
-[PANet] --> https://arxiv.org/pdf/1803.01534.pdf
-For batch size scheduling --> https://arxiv.org/pdf/1706.02677.pdf
-For bottom-up path aug --> https://arxiv.org/pdf/1803.01534.pdf
+[1]: [Group Normalization] --> https://arxiv.org/pdf/1803.08494.pdf
+
+[2]: [PANet] --> https://arxiv.org/pdf/1803.01534.pdf
+
+[3]: For batch size scheduling --> https://arxiv.org/pdf/1706.02677.pdf
 
 
 # Mask R-CNN for Object Detection and Segmentation
