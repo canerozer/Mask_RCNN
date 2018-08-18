@@ -189,12 +189,23 @@ class Config(object):
     # Gradient norm clipping
     GRADIENT_CLIP_NORM = 5.0
 
-    # Customization by Caner Ozer
-    INIT_BN = True    
-    INIT_GN = False
-    TRAIN_GN = False  # Group Normalization Training Option
-    USE_BOTTOM_UP_AUG = False # Bottom-up augumentation proposed in 
-                              # arXiv: 1803.01534
+    ### Customization by Caner Ozer ###
+    
+    # GN/BN Initialization/Training
+    INIT_BN_BACKBONE = True    
+    INIT_GN_BACKBONE = False
+    INIT_BN_HEAD = True    
+    INIT_GN_HEAD = False
+    TRAIN_GN = False  # Group Normalization Training Option, 
+                      # is always true when GN is initialized
+    # Things proposed in arXiv: 1803.01534
+    USE_BOTTOM_UP_AUG = False # Bottom-up augumentation setting
+    LATERAL_SHORTCUTS = False # Green and red dash connections                               
+    FC_MASK_FUSION = False # Mask fusion setting
+
+    # Importing particles for inference instead of using RPN outputs
+    POST_PS_ROIS_INFERENCE = 400
+    PARTICLE_IOU_SUPPRESSION_THR = 0.4
 
     def __init__(self):
         """Set values of computed attributes."""

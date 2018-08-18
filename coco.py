@@ -30,6 +30,7 @@ Usage: import the module (see Jupyter notebooks for examples), or run from
 import os
 import time
 import numpy as np
+from imgaug import augmenters as iaa
 
 # Download and install the Python COCO tools from https://github.com/waleedka/coco
 # That's a fork from the original https://github.com/pdollar/coco with a bug
@@ -84,8 +85,8 @@ class CocoConfig(Config):
 
     # We use a GPU with 12GB memory, which can fit two images.
     # Adjust down if you use a smaller GPU.
-    IMAGES_PER_GPU = 1
-    #IMAGES_PER_GPU = 2
+    #IMAGES_PER_GPU = 1
+    IMAGES_PER_GPU = 2
 
     STEPS_PER_EPOCH = 1000
 
@@ -95,13 +96,19 @@ class CocoConfig(Config):
     # Number of classes (including background)
     NUM_CLASSES = 1 + 1  # COCO has 80 classes
 
-    LEARNING_RATE = 0.00125
-    #LEARNING_RATE = 0.00125 * 2 # when BS=2
+    #LEARNING_RATE = 0.00125
+    LEARNING_RATE = 0.00125 * 2 # when BS=2
 
-    INIT_BN = False
-    INIT_GN = True
-    TRAIN_GN = False  # Group Normalization Training Option
+    INIT_BN_BACKBONE = True    
+    INIT_GN_BACKBONE = False
+    INIT_BN_HEAD = False    
+    INIT_GN_HEAD = True
     TRAIN_BN = False    
+    TRAIN_GN = True  # Group Normalization Layers Training Option
+
+    LATERAL_SHORTCUTS = True # Green and red dash connections                               
+    FC_MASK_FUSION = True
+    USE_BOTTOM_UP_AUG = True
 
 ############################################################
 #  Dataset
@@ -492,6 +499,9 @@ if __name__ == '__main__':
     if args.command == "train":
         model = modellib.MaskRCNN(mode="training", config=config,
                                   model_dir=args.logs)
+    elif args.command == "particle_evaluate":
+        model = modellib.MaskRCNN(mode="extension", config=config,
+                                  model_dir=args.logs)
     else:
         model = modellib.MaskRCNN(mode="inference", config=config,
                                   model_dir=args.logs)
@@ -526,14 +536,24 @@ if __name__ == '__main__':
         dataset_val.load_coco(args.dataset, "minival", year=args.year, auto_download=args.download)
         dataset_val.prepare()
 
+        # Image Augmentation
+
+        sometimes = lambda aug: iaa.Sometimes(0.5, aug)
+        #augmentation = None
+        augmentation = iaa.Sequential(
+            [iaa.Fliplr(0.5),
+             sometimes(iaa.GaussianBlur((0, 2.0))),
+             sometimes(iaa.ContrastNormalization((0.5, 2.0), per_channel=0.5))])
+
         # *** This training schedule is an example. Update to your needs ***
 
         # Training - Stage 1
         print("Training network heads")
         model.train(dataset_train, dataset_val,
                     learning_rate=config.LEARNING_RATE,
-                    epochs=20,
+                    epochs=30,
                     layers='heads',
+                    augmentation=augmentation,
                     period=args.period)
 		# TO DO: Modify the validation setting etc
 
@@ -542,18 +562,19 @@ if __name__ == '__main__':
         #print("Fine tune Resnet stage 4 and up")
         #model.train(dataset_train, dataset_val,
         #            learning_rate=config.LEARNING_RATE,
-        #            epochs=20,
+        #            epochs=30,
         #            layers='4+',
         #            period=args.period)
 
         # Training - Stage 3
         # Fine tune all layers
-        print("Fine tune all layers")
-        model.train(dataset_train, dataset_val,
-                    learning_rate=config.LEARNING_RATE / 10,
-                    epochs=40,
-                    layers='all',
-                    period=args.period)
+        #print("Fine tune all layers")
+        #model.train(dataset_train, dataset_val,
+        #            learning_rate=config.LEARNING_RATE / 10,
+        #            epochs=40,
+        #            layers='all',
+        #            augmentation=augmentation,
+        #            period=args.period)
 
     elif args.command == "evaluate":
         # Validation dataset
@@ -587,6 +608,14 @@ if __name__ == '__main__':
         gtruths, predictions, cfmatrix = utils.compute_cm(dataset_confusion, dataset_confusion.image_ids, 
             dataset_confusion.class_names, args.model, config)
         utils.plot_cfmatrix(cfmatrix)
+    
+    elif args.command == "particle_evaluate":
+        # Validation dataset
+        dataset_val = CocoDataset()
+        coco = dataset_val.load_coco(args.dataset, "minival", year=args.year, return_coco=True, auto_download=args.download)
+        dataset_val.prepare()
+        print("Running COCO evaluation on {} images.".format(args.limit))
+        evaluate_coco(model, dataset_val, coco, "bbox", limit=int(args.limit))
 		
     else:
         print("'{}' is not recognized. "

@@ -704,7 +704,7 @@ class Analysis:
                                         video, self.dataset_name))
                     video_gts.append(np.array([d+1, x, y, x+w, y+h], dtype=np.float32))
 
-            elif self.dataset_name == "VOT2016_Subset" or self.dataset_name == "VOT2016_Subset_Subset"\
+            elif self.dataset_name == "VOT2016_Subset" or self.dataset_name == "VOT2016_face_Subset"\
                 or self.dataset_name == "VOT2016":
 
                 gt_path = os.path.join(self.datasets_dir, video, self.ground_truth_filename)
@@ -790,10 +790,11 @@ class Analysis:
 
 if __name__ == "__main__":
     # test-case -1
-    dataset_name = "VOT2016_Subset_Subset"
-    datasets_dir = "Datasets/"+dataset_name+"/"
+    images_dir = "VOT2016/"
+    dataset_name = "VOT2016_face_Subset"
+    datasets_dir = "Datasets/"+dataset_name+"/"+images_dir+"/"
     ground_truth_file_name = "groundtruth.txt"
-    preds_dir = "logs/Evaluations/MASK_VOT2016FACE_509imgtrain_20/"
+    preds_dir = "logs/Evaluations/MASK_VOT2018_Subsets/stage1-10of30/"
     # preds_dir = "logs/Evaluations/MASK_VOT2016FACE_184imgtrain/"
     number_top = 5
     log_analysis = "analysistop2/"
@@ -838,7 +839,7 @@ if __name__ == "__main__":
 
     analyse = Analysis(datasets_dir, ground_truth_file_name, number_top, log_analysis,
                          debug=debug, preds_dir=preds_dir, dataset_name=dataset_name,
-                         heed_singles=False, heed_multiples=False, all_tp=True,
+                         heed_singles=True, heed_multiples=True, all_tp=True,
                          counter_or_objectness='counter')
     analyse.video_player()
 

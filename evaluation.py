@@ -20,12 +20,20 @@ import time
 
 # Test some videos
 parser = argparse.ArgumentParser(description='Test some videos.')
+parser.add_argument("--mode", required=True,
+                    metavar="<mode>",
+                    help="Indicate the model mode as 'inference' or"
+                         " 'extension'.")
 parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
                     default="/home/mspr/Datasets/test_dataset",
                     help='enter the test directory')
 parser.add_argument('--model-dir', metavar='MD', type=str,
                     default=None,
                     help='enter the test directory')
+parser.add_argument('--particles-dir', metavar='PD', type=str,
+                    default=None,
+                    help='folder directory for importing particle filter'
+                         ' proposals when the mode is set to extension')
 
 args = parser.parse_args()
 
@@ -48,36 +56,54 @@ if not os.path.exists(COCO_MODEL_PATH):
 IMAGE_DIR = os.path.join(args.test_dataset_dir)
 
 
-frame_folder_names = os.listdir(IMAGE_DIR)
 video_directories = []
 video_names = []
+frame_folder_names = sorted(os.listdir(IMAGE_DIR))
 for folder_name in frame_folder_names:
     assert os.path.isdir(os.path.join(IMAGE_DIR, folder_name)), (
     "The image directory should only contain folders")
     video_names.append(folder_name)
     video_directories.append(os.path.join(IMAGE_DIR, folder_name))
 
+# Directory for particles should be entered
+#when the mode is extension.
+PARTICLE_DIR = args.particles_dir
+if args.mode == "extension":
+    assert PARTICLE_DIR is not None, "Present the directory for particles."
+
+    # Check for if particles for all videos are present.
+    particles_videoname = sorted(os.listdir(PARTICLE_DIR))
+    videonames = ([x.split("_", maxsplit=1)[0] for x in particles_videoname])
+    assert frame_folder_names == videonames, "Some particle files or videos "\
+                                            "are missing"
+    particles_full_path = [os.path.join(PARTICLE_DIR, x) for x in
+                           particles_videoname]
+    # Importing text files to construct numpy arrays
+
 class InferenceConfig(coco.CocoConfig):
     # Set batch size to 1 since we'll be running inference on
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
-    NUM_CLASSES = 1 + 1
-    # RPN_NMS_THRESHOLD = 0.7   
+    NUM_CLASSES = 80 + 1
+    # RPN_NMS_THRESHOLD = 0.7
     # DETECTION_NMS_THRESHOLD = 0.2
     DETECTION_MIN_CONFIDENCE = 0.01
+    DETECTION_NMS_THRESHOLD = 0.99
 
-    INIT_BN = False    
-    INIT_GN = True
-    TRAIN_GN = False  # Group Normalization Training Option
+    INIT_BN_BACKBONE = True    
+    INIT_GN_BACKBONE = False
+    INIT_BN_HEAD = True    
+    INIT_GN_HEAD = False
 
 config = InferenceConfig()
 config.display()
 
 # Create model object in inference mode.
-model = modellib.MaskRCNN(mode="inference", model_dir=MODEL_DIR, config=config)
+model = modellib.MaskRCNN(mode=args.mode, model_dir=MODEL_DIR, config=config)
 
 # Load weights trained on MS-COCO
+print("Loading weights")
 model.load_weights(COCO_MODEL_PATH, by_name=True)
 
 # COCO Class names
@@ -107,6 +133,13 @@ def coco_to_voc_bbox_converter(y1, x1, y2, x2, roi_score):
     h = y2 - y1
     return x1, y1, w, h, roi_score
 
+def voc_to_coco_bbox_converter(arr):
+    x, y, w, h = arr[:, :, 0], arr[:, :, 1], arr[:, :, 2], arr[:, :, 3]
+    x2 = x + w
+    y2 = y + h
+    new_arr = np.array((y, x, y2, x2)).transpose((1, 2, 0))
+    return new_arr
+
 def to_rgb1(im):
     # I think this will be slow
     w, h = im.shape
@@ -122,12 +155,22 @@ def softmax(arr):
     probs = np.exp(arr)/(np.sum(np.exp(arr), axis=1)[:, np.newaxis])
     return probs
 
+def particle_array_const(particle_file):
+    particles = []
+    with open(particle_file, "r+") as f:
+        particles.append(f.read().split("\n"))
+    particles = particles[0][:-1]
+    particles = [temp.split(" ") for temp in particles]
+    particles_np = np.array(particles).reshape((-1, 400, 4)).astype(np.float)
+    return particles_np
 
 # Start testifying images for every frame in a particular folder_name.
 # When enumerator hits the batch size number, the model will begin detection.
 video_counter = 0
 
 for video_id, video_dir in enumerate(video_directories):
+    if args.mode == "extension":
+        particles = particle_array_const(particles_full_path[video_id])
     with open(MODEL_DIR+"/"+video_names[video_id]+"_mask", 'a+') as f:
         f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
         print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
@@ -150,7 +193,10 @@ for video_id, video_dir in enumerate(video_directories):
 
             if len(image_list)==config.BATCH_SIZE:
                 print("Processed Frame ID: {}/{}".format(d+1, len(image_ids)))
-                results = model.detect(image_list, verbose=1)
+                if args.mode == "extension":
+                    results = model.detect(image_list, verbose=1, particles=particles[d])
+                elif args.mode == "inference":
+                    results = model.detect(image_list, verbose=1)
                 r = results[0]
                 image_list.clear()
                 for score_id, scores in enumerate(r['scores']):
@@ -172,7 +218,7 @@ for video_id, video_dir in enumerate(video_directories):
 
                     x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
                     things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
-                                      .format(image_id[:-4], x, y, w, h, format(score, '.8f'), 
+                                      .format(image_id[:-4], x, y, w, h, format(score, '.8f'),
                                       predicted_class_id, p_c_ids[0],
                                     format(probs[0], '.8f'), p_c_ids[1],
                                     format(probs[1], '.8f'), p_c_ids[2],
