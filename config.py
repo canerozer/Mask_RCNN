@@ -51,6 +51,11 @@ class Config(object):
     # Supported values are: resnet50, resnet101
     BACKBONE = "resnet101"
 
+    # Only useful if you supply a callable to BACKBONE. Should compute
+    # the shape of each layer of the FPN Pyramid.
+    # See model.compute_backbone_shapes
+    COMPUTE_BACKBONE_SHAPE = None
+
     # The strides of each layer of the FPN Pyramid. These values
     # are based on a Resnet101 backbone.
     BACKBONE_STRIDES = [4, 8, 16, 32, 64]
@@ -204,8 +209,9 @@ class Config(object):
     FC_MASK_FUSION = False # Mask fusion setting
 
     # Importing particles for inference instead of using RPN outputs
-    POST_PS_ROIS_INFERENCE = 400
+    POST_PS_ROIS_INFERENCE = 1000 # 1000 if using RPN, 400 for particles
     PARTICLE_IOU_SUPPRESSION_THR = 0.4
+    FILTER_BACKGROUND = False
 
     def __init__(self):
         """Set values of computed attributes."""

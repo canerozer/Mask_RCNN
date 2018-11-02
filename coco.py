@@ -106,9 +106,9 @@ class CocoConfig(Config):
     TRAIN_BN = False    
     TRAIN_GN = True  # Group Normalization Layers Training Option
 
-    LATERAL_SHORTCUTS = True # Green and red dash connections                               
+    LATERAL_SHORTCUTS = False # Green and red dash connections                               
     FC_MASK_FUSION = True
-    USE_BOTTOM_UP_AUG = True
+    USE_BOTTOM_UP_AUG = False
 
 ############################################################
 #  Dataset
@@ -509,18 +509,23 @@ if __name__ == '__main__':
     # Select weights file to load
     if args.model.lower() == "coco":
         model_path = COCO_MODEL_PATH
+        exclude = ["mrcnn_class_logits", "mrcnn_bbox_fc",
+                   "mrcnn_bbox", "mrcnn_mask"]
     elif args.model.lower() == "last":
         # Find last trained weights
         model_path = model.find_last()[1]
+        exclude = None
     elif args.model.lower() == "imagenet":
         # Start from ImageNet trained weights
         model_path = model.get_imagenet_weights()
+        exclude = None
     else:
         model_path = args.model
+        exclude = None
 
     # Load weights
     print("Loading weights ", model_path)
-    model.load_weights(model_path, by_name=True)
+    model.load_weights(model_path, by_name=True, exclude=exclude)
 
     # Train or evaluate
     if args.command == "train":

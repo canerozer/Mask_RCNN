@@ -17,6 +17,7 @@ import utils
 import model as modellib
 import visualize
 import time
+from config import Config
 
 # Test some videos
 parser = argparse.ArgumentParser(description='Test some videos.')
@@ -80,21 +81,34 @@ if args.mode == "extension":
                            particles_videoname]
     # Importing text files to construct numpy arrays
 
-class InferenceConfig(coco.CocoConfig):
+class InferenceConfig(Config):
     # Set batch size to 1 since we'll be running inference on
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
+    global args
+    NAME = "coco_evaluation"
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
     NUM_CLASSES = 80 + 1
-    # RPN_NMS_THRESHOLD = 0.7
-    # DETECTION_NMS_THRESHOLD = 0.2
-    DETECTION_MIN_CONFIDENCE = 0.01
-    DETECTION_NMS_THRESHOLD = 0.99
 
+    DETECTION_MIN_CONFIDENCE = 0.0
+    DETECTION_NMS_THRESHOLD = 1.0
+    FILTER_BACKGROUND = False
+
+    if args.mode == "extension":
+        POST_PS_ROIS_INFERENCE = 400
+        DETECTION_MAX_INSTANCES = 400
+    elif args.mode == "inference":
+        POST_PS_ROIS_INFERENCE = 1000
+        DETECTION_MAX_INSTANCES = 1000
+        
     INIT_BN_BACKBONE = True    
     INIT_GN_BACKBONE = False
     INIT_BN_HEAD = True    
     INIT_GN_HEAD = False
+
+    #USE_BOTTOM_UP_AUG = False # Bottom-up augumentation setting
+    #LATERAL_SHORTCUTS = False # Green and red dash connections                               
+    #FC_MASK_FUSION = False # Mask fusion setting
 
 config = InferenceConfig()
 config.display()
@@ -217,7 +231,12 @@ for video_id, video_dir in enumerate(video_directories):
                         p_c_ids = np.pad(p_c_ids, (0,diff), 'constant', constant_values=0)
 
                     x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
-                    things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
+
+                    # When backgrounds are not filtered, the objectness score still needs to remain consistent.
+                    if predicted_class_id == 0:
+                        score = probs[1]
+
+                    things_to_write = "{}\t\t\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
                                       .format(image_id[:-4], x, y, w, h, format(score, '.8f'),
                                       predicted_class_id, p_c_ids[0],
                                     format(probs[0], '.8f'), p_c_ids[1],
