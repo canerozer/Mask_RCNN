@@ -1,5 +1,5 @@
 """
-Custom usage: python3 evaluation.py --test-dataset-dir="Datasets/VOT2016/"\
+Custom usage: python3 evaluation.py --mode="inference" --test-dataset-dir="Datasets/VOT2016/"\
 --model-dir="logs/
 """
 
@@ -74,9 +74,11 @@ if args.mode == "extension":
 
     # Check for if particles for all videos are present.
     particles_videoname = sorted(os.listdir(PARTICLE_DIR))
-    videonames = ([x.split("_", maxsplit=1)[0] for x in particles_videoname])
+    videonames = ([x.split("_", maxsplit=2)[0] for x in particles_videoname])
+
     assert frame_folder_names == videonames, "Some particle files or videos "\
                                             "are missing"
+
     particles_full_path = [os.path.join(PARTICLE_DIR, x) for x in
                            particles_videoname]
     # Importing text files to construct numpy arrays
@@ -92,11 +94,13 @@ class InferenceConfig(Config):
 
     DETECTION_MIN_CONFIDENCE = 0.0
     DETECTION_NMS_THRESHOLD = 1.0
-    FILTER_BACKGROUND = False
+    FILTER_BACKGROUND = True
 
     if args.mode == "extension":
-        POST_PS_ROIS_INFERENCE = 400
-        DETECTION_MAX_INSTANCES = 400
+        #POST_PS_ROIS_INFERENCE = 400
+        POST_PS_ROIS_INFERENCE = 90
+        #DETECTION_MAX_INSTANCES = 400
+        DETECTION_MAX_INSTANCES = 90
     elif args.mode == "inference":
         POST_PS_ROIS_INFERENCE = 1000
         DETECTION_MAX_INSTANCES = 1000
@@ -169,13 +173,13 @@ def softmax(arr):
     probs = np.exp(arr)/(np.sum(np.exp(arr), axis=1)[:, np.newaxis])
     return probs
 
-def particle_array_const(particle_file):
+def particle_array_const(particle_file, config=config):
     particles = []
     with open(particle_file, "r+") as f:
         particles.append(f.read().split("\n"))
     particles = particles[0][:-1]
     particles = [temp.split(" ") for temp in particles]
-    particles_np = np.array(particles).reshape((-1, 400, 4)).astype(np.float)
+    particles_np = np.array(particles).reshape((-1, config.POST_PS_ROIS_INFERENCE, 4)).astype(np.float)
     return particles_np
 
 # Start testifying images for every frame in a particular folder_name.
@@ -195,7 +199,10 @@ for video_id, video_dir in enumerate(video_directories):
         print(video_dir)
         image_ids = os.listdir(video_dir)
         image_counter = 0
+
         sorted_image_ids = sorted(image_ids, key=lambda x: x[:-4])
+        sorted_image_ids = list(filter(lambda x:  x[-4:] == ".jpg", sorted_image_ids))
+
         for d, image_id in enumerate(sorted_image_ids):
             print (image_id)
             if(image_id[-4:]==".jpg"):
@@ -206,7 +213,7 @@ for video_id, video_dir in enumerate(video_directories):
                 image_list.append(image)
 
             if len(image_list)==config.BATCH_SIZE:
-                print("Processed Frame ID: {}/{}".format(d+1, len(image_ids)))
+                print("Processed Frame ID: {}/{}".format(d+1, len(sorted_image_ids)))
                 if args.mode == "extension":
                     results = model.detect(image_list, verbose=1, particles=particles[d])
                 elif args.mode == "inference":
@@ -235,6 +242,7 @@ for video_id, video_dir in enumerate(video_directories):
                     # When backgrounds are not filtered, the objectness score still needs to remain consistent.
                     if predicted_class_id == 0:
                         score = probs[1]
+                        predicted_class_id = p_c_ids[1]
 
                     things_to_write = "{}\t\t\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
                                       .format(image_id[:-4], x, y, w, h, format(score, '.8f'),

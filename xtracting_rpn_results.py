@@ -25,7 +25,7 @@ import tensorflow as tf
 # Test some videos
 parser = argparse.ArgumentParser(description='Test some videos.')
 parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
-                    default="/media/dontgetdown/model_partition/OTB/",
+                    default="Datasets/Test_frame/",
                     help='enter the test directory')
 parser.add_argument('--image-extension', metavar='CDC', type=str,
                     default=".jpg", help="type the codec of images")
@@ -120,13 +120,13 @@ def to_rgb1(im):
 video_counter = 0
 
 # Number of clipped refined anchors to be extracted per frame is limited to 50.
-limit = 50
+limit = 6000
 for video_id, video_dir in enumerate(video_directories):
     print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
     print("Video Name: {}".format(video_dir))
 
     image_list = []
-    image_ids = os.listdir(os.path.join(IMAGE_DIR, video_dir))
+    image_ids = os.listdir(video_dir)
     image_counter = 0
 
     # Sort the images in folder and retrieve only jpg images
@@ -169,12 +169,13 @@ for video_id, video_dir in enumerate(video_directories):
                 ("rpn_class", model.keras_model.get_layer("rpn_class").output),
                 ("proposals", model.keras_model.get_layer("ROI").output),
                 ("refined_anchors_clipped",
-                    model.ancestor(pillar, "ROI/refined_anchors_clipped:0")),
+                    model.ancestor(pillar, "ROI/refined_anchors_clipped:0"))
             ])
 
             # Updating to the recent version of refined_anchors_clipped,
             # Normalized coordinates will be resized to 1024 x 1024
-            r = results["refined_anchors_clipped"][0, :limit]
+            #r = results["refined_anchors_clipped"]
+            r = results["proposals"][:limit]
             r = r * np.array([1024, 1024, 1024, 1024])
 
             scores = ((np.sort(results['rpn_class'][:, :, 1]
@@ -185,8 +186,8 @@ for video_id, video_dir in enumerate(video_directories):
             # A little bit of math for converting image dimensions 
             # from 1024 x 1024 to dim[0] x dim[1]
 
-            r = (r - np.array((aver_pad_y, aver_pad_x,
-                               aver_pad_y, aver_pad_x)))/scale
+            r = ((r - np.array((aver_pad_y, aver_pad_x,
+                               aver_pad_y, aver_pad_x)))/scale).squeeze()
 
             # Clears the image list after evaluation
             image_list.clear()

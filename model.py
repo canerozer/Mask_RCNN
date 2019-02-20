@@ -1084,8 +1084,8 @@ class ParticleSuppressLayer(KE.Layer):
         #     return inter
 
         #ious = overlaps_graph(rpn_rois[0], particles[0])
-        all_samples = tf.concat([rpn_rois, particles], 1)
-        all_samples = tf.Print(all_samples, [all_samples])
+        #all_samples = tf.concat([rpn_rois, particles], 1)
+        #all_samples = tf.Print(all_samples, [all_samples])
         return particles
 
         #
@@ -2147,7 +2147,7 @@ class MaskRCNN():
         config: A Sub-class of the Config class
         model_dir: Directory to save training logs and trained weights
         """
-        assert mode in ['training', 'inference', 'extension']
+        assert mode in ['training', 'inference', 'extension', 'correlate']
         self.mode = mode
         self.config = config
         self.model_dir = model_dir
@@ -2160,7 +2160,7 @@ class MaskRCNN():
             mode: Either "training" or "inference". The inputs and
                 outputs of the model differ accordingly.
         """
-        assert mode in ['training', 'inference', 'extension']
+        assert mode in ['training', 'inference', 'extension', 'correlate']
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]
@@ -2210,7 +2210,7 @@ class MaskRCNN():
 
         elif mode == "extension":
             # Anchors in normalized coordinates
-            support_particles = KL.Input(batch_shape=[None, 400, 4],
+            support_particles = KL.Input(batch_shape=[None, config.POST_PS_ROIS_INFERENCE, 4],
                                          name="particles", dtype=tf.float32)
             input_anchors = KL.Input(shape=[None, 4], name="input_anchors")
 
@@ -2220,6 +2220,14 @@ class MaskRCNN():
             # A hack to get around Keras's bad support for constants
             # support_particles = KL.Lambda(lambda x: tf.Variable(support_particles),
             #                               name="particles")(input_image)
+
+        elif mode == "correlate":
+            input_anchors = KL.Input(shape=[None, 4], name="input_anchors")
+            fpn2 = KL.Input(shape=[None, 256, 256, 256], name="input_fpn2")
+            fpn3 = KL.Input(shape=[None, 128, 128, 256], name="input_fpn3")
+            fpn4 = KL.Input(shape=[None, 64, 64, 256], name="input_fpn4")
+            fpn5 = KL.Input(shape=[None, 32, 32, 256], name="input_fpn5")
+            raise NotImplementedError
 
         # Build the shared convolutional layers.
         # Bottom-up Layers
@@ -2427,6 +2435,10 @@ class MaskRCNN():
                              [detections, mrcnn_class_logits, mrcnn_bbox,
                                  mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
+
+        elif mode == "correlate":
+            raise NotImplementedError
+
         else:
             # Network Heads
             # Proposal classifier and BBox regressor heads
@@ -2869,12 +2881,13 @@ class MaskRCNN():
         scores: [N] float probability scores for the class IDs
         masks: [H, W, N] instance binary masks
         logits: [N, 81] class-based activations for each detection
-        particles: Numpy array of (N, 400, 4).
+        particles: Numpy array of (N, config.POST_PS_ROIS_INFERENCE, 4).
         """
-        assert (self.mode == "inference" or self.mode == "extension"),\
+        all_modes = ["inference", "extension", "correlate"]
+        assert self.mode in all_modes,\
             "Create model in inference or extension mode."
-        assert len(
-            images) == self.config.BATCH_SIZE, "len(images) must be equal to BATCH_SIZE"
+        assert len(images) == self.config.BATCH_SIZE,\
+            "len(images) must be equal to BATCH_SIZE"
 
         if self.mode == "extension":
             assert particles is not None
@@ -2916,6 +2929,8 @@ class MaskRCNN():
             detections, mrcnn_class_logits, _, mrcnn_mask, _, _, _ =\
                 self.keras_model.predict([molded_images, image_metas, anchors, particles],
                                          verbose=0)
+        elif self.mode == "correlate":
+            raise NotImplementedError
 
         # Process detections
         results = []
@@ -2923,7 +2938,8 @@ class MaskRCNN():
             final_rois, final_class_ids, final_scores, final_masks, final_logits =\
                 self.unmold_detections(detections[i], mrcnn_mask[i],
                                        image.shape, molded_images[i].shape,
-                                       windows[i], filter_background=self.config.FILTER_BACKGROUND)
+                                       windows[i],
+                                       filter_background=self.config.FILTER_BACKGROUND)
             results.append({
                 "rois": final_rois,
                 "class_ids": final_class_ids,
@@ -2945,7 +2961,8 @@ class MaskRCNN():
         scores: [N] float probability scores for the class IDs
         masks: [H, W, N] instance binary masks
         """
-        assert self.mode == "inference" or "extension", "Create model in inference mode."
+        all_modes = ["inference", "extension", "correlate"]
+        assert self.mode in all_modes, "Create model in inference mode."
         assert len(molded_images) == self.config.BATCH_SIZE,\
             "Number of images must be equal to BATCH_SIZE"
 
