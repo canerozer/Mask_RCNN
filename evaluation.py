@@ -23,9 +23,9 @@ from config import Config
 parser = argparse.ArgumentParser(description='Test some videos.')
 parser.add_argument("--mode", required=True,
                     metavar="<mode>",
-                    help="Indicate the model mode as 'inference' or"
-                         " 'extension'.")
-parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
+                    help="Indicate the model mode as 'inference',"
+                         "'extension' or 'inference_rpn'.")
+parser.add_argument('test_dataset_dir', metavar='TD', type=str,
                     default="/home/mspr/Datasets/test_dataset",
                     help='enter the test directory')
 parser.add_argument('--model-dir', metavar='MD', type=str,
@@ -74,7 +74,7 @@ if args.mode == "extension":
 
     # Check for if particles for all videos are present.
     particles_videoname = sorted(os.listdir(PARTICLE_DIR))
-    videonames = ([x.split("_", maxsplit=2)[0] for x in particles_videoname])
+    videonames = ([x.split("_", maxsplit=3)[0] for x in particles_videoname])
 
     assert frame_folder_names == videonames, "Some particle files or videos "\
                                             "are missing"
@@ -93,14 +93,14 @@ class InferenceConfig(Config):
     NUM_CLASSES = 80 + 1
 
     DETECTION_MIN_CONFIDENCE = 0.0
-    DETECTION_NMS_THRESHOLD = 1.0
+    DETECTION_NMS_THRESHOLD = 0.7
     FILTER_BACKGROUND = True
 
     if args.mode == "extension":
         #POST_PS_ROIS_INFERENCE = 400
-        POST_PS_ROIS_INFERENCE = 90
+        POST_PS_ROIS_INFERENCE = 1000
         #DETECTION_MAX_INSTANCES = 400
-        DETECTION_MAX_INSTANCES = 90
+        DETECTION_MAX_INSTANCES = 1000
     elif args.mode == "inference":
         POST_PS_ROIS_INFERENCE = 1000
         DETECTION_MAX_INSTANCES = 1000
@@ -173,13 +173,32 @@ def softmax(arr):
     probs = np.exp(arr)/(np.sum(np.exp(arr), axis=1)[:, np.newaxis])
     return probs
 
-def particle_array_const(particle_file, config=config):
+def particle_array_const(particle_file, first_img, config=config):
+    first_img = skimage.io.imread(first_img)
+    dim_y, dim_x, _ = first_img.shape
+
     particles = []
     with open(particle_file, "r+") as f:
         particles.append(f.read().split("\n"))
     particles = particles[0][:-1]
     particles = [temp.split(" ") for temp in particles]
-    particles_np = np.array(particles).reshape((-1, config.POST_PS_ROIS_INFERENCE, 4)).astype(np.float)
+    particles_np = np.array(particles).astype(np.float64)
+
+    # Get the scale and padding parameters by using resize_image.
+    _, _, scale, pad, _ = utils.resize_image(first_img,
+                                             min_dim=config.IMAGE_MIN_DIM,
+                                             max_dim=config.IMAGE_MAX_DIM,
+                                             min_scale=config.IMAGE_MIN_SCALE,
+                                             mode="square")
+
+    # Roughly calculate padding across different axises.
+    aver_pad_y = (pad[0][0] + pad[0][1])/2
+    aver_pad_x = (pad[1][0] + pad[1][1])/2
+
+    particles_np *= np.array((dim_y, dim_x, dim_y, dim_x))
+    particles_np = (particles_np * scale) + np.array((aver_pad_y, aver_pad_x, aver_pad_y, aver_pad_x))
+    particles_np /= np.array((1024, 1024, 1024, 1024))
+    particles_np = particles_np.reshape((-1, config.POST_PS_ROIS_INFERENCE, 4))
     return particles_np
 
 # Start testifying images for every frame in a particular folder_name.
@@ -188,8 +207,9 @@ video_counter = 0
 
 for video_id, video_dir in enumerate(video_directories):
     if args.mode == "extension":
-        particles = particle_array_const(particles_full_path[video_id])
-    with open(MODEL_DIR+"/"+video_names[video_id]+"_mask", 'a+') as f:
+        particles = particle_array_const(particles_full_path[video_id],
+                                         os.path.join(video_dir, os.listdir(video_dir)[0]))
+    with open(MODEL_DIR+"/"+video_names[video_id]+"_mask_RA_nms07", 'a+') as f:
         f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
         print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
         print("Video name: {}".format(video_dir))
@@ -197,9 +217,10 @@ for video_id, video_dir in enumerate(video_directories):
         print(IMAGE_DIR)
         print("")
         print(video_dir)
-        image_ids = os.listdir(video_dir)
+
         image_counter = 0
 
+        image_ids = os.listdir(video_dir)
         sorted_image_ids = sorted(image_ids, key=lambda x: x[:-4])
         sorted_image_ids = list(filter(lambda x:  x[-4:] == ".jpg", sorted_image_ids))
 
@@ -216,7 +237,7 @@ for video_id, video_dir in enumerate(video_directories):
                 print("Processed Frame ID: {}/{}".format(d+1, len(sorted_image_ids)))
                 if args.mode == "extension":
                     results = model.detect(image_list, verbose=1, particles=particles[d])
-                elif args.mode == "inference":
+                elif args.mode == "inference" or args.mode == "inference_rpn":
                     results = model.detect(image_list, verbose=1)
                 r = results[0]
                 image_list.clear()
@@ -230,19 +251,24 @@ for video_id, video_dir in enumerate(video_directories):
                     # Arguments of top-5
                     p_c_ids = np.argsort(-r['logits'][score_id])[:5]
 
+                    if args.mode == "inference_rpn":
+                        diff = 3
+                        predicted_class_id = np.pad(predicted_class_id, (0,diff), 'constant', constant_values=0)
+                        probs = np.pad(probs, (0,diff), 'constant', constant_values=0)
+                        p_c_ids = np.pad(p_c_ids, (0,diff), 'constant', constant_values=0)
                     # When # of classes are less than 5
-                    if config.NUM_CLASSES < 5:
+                    elif config.NUM_CLASSES < 5:
                         diff = 5 - config.NUM_CLASSES
                         predicted_class_id = np.pad(predicted_class_id, (0,diff), 'constant', constant_values=0)
                         probs = np.pad(probs, (0,diff), 'constant', constant_values=0)
                         p_c_ids = np.pad(p_c_ids, (0,diff), 'constant', constant_values=0)
 
-                    x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
+                        # When backgrounds are not filtered, the objectness score still needs to remain consistent.
 
-                    # When backgrounds are not filtered, the objectness score still needs to remain consistent.
                     if predicted_class_id == 0:
                         score = probs[1]
                         predicted_class_id = p_c_ids[1]
+                    x, y, w, h, score = coco_to_voc_bbox_converter(y1, x1, y2, x2, obj_score)
 
                     things_to_write = "{}\t\t\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\n"\
                                       .format(image_id[:-4], x, y, w, h, format(score, '.8f'),

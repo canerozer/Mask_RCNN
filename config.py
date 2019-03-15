@@ -210,7 +210,6 @@ class Config(object):
 
     # Importing particles for inference instead of using RPN outputs
     POST_PS_ROIS_INFERENCE = 1000 # 1000 if using RPN, 400 for particles
-    PARTICLE_IOU_SUPPRESSION_THR = 0.4
     FILTER_BACKGROUND = True
 
     def __init__(self):

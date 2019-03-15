@@ -965,3 +965,18 @@ def binary_mask_to_rle(binary_mask):
                 counts.append(0)
         counts.append(len(list(elements)))
     return rle
+
+def norm2orig(boxes, window, image_shape, original_image_shape): 
+    # Translate normalized coordinates in the resized image to pixel
+    # coordinates in the original image before resizing
+    window = norm_boxes(window, image_shape[:2])
+    wy1, wx1, wy2, wx2 = window
+    shift = np.array([wy1, wx1, wy1, wx1])
+    wh = wy2 - wy1  # window height
+    ww = wx2 - wx1  # window width
+    scale = np.array([wh, ww, wh, ww])
+    # Convert boxes to normalized coordinates on the window
+    boxes = np.divide(boxes - shift, scale)
+    # Convert boxes to pixel coordinates on the original image
+    boxes = denorm_boxes(boxes, original_image_shape[:2])
+    return boxes

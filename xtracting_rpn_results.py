@@ -24,7 +24,7 @@ import tensorflow as tf
 
 # Test some videos
 parser = argparse.ArgumentParser(description='Test some videos.')
-parser.add_argument('--test-dataset-dir', metavar='TD', type=str,
+parser.add_argument('test_dataset_dir', metavar='TD', type=str,
                     default="Datasets/Test_frame/",
                     help='enter the test directory')
 parser.add_argument('--image-extension', metavar='CDC', type=str,
@@ -70,6 +70,7 @@ class InferenceConfig(coco.CocoConfig):
     IMAGES_PER_GPU = 1
     NUM_CLASSES = 80 + 1
     RPN_ANCHOR_STRIDE = 1
+
 
 config = InferenceConfig()
 config.display()
@@ -119,8 +120,8 @@ def to_rgb1(im):
 # When enumerator hits the batch size number, the model will begin detection.
 video_counter = 0
 
-# Number of clipped refined anchors to be extracted per frame is limited to 50.
-limit = 6000
+# Number of clipped refined anchors to be extracted per frame is limited to 1k
+limit = 1000
 for video_id, video_dir in enumerate(video_directories):
     print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
     print("Video Name: {}".format(video_dir))
@@ -174,8 +175,10 @@ for video_id, video_dir in enumerate(video_directories):
 
             # Updating to the recent version of refined_anchors_clipped,
             # Normalized coordinates will be resized to 1024 x 1024
+            r = results["refined_anchors_clipped"][0, :limit]
             #r = results["refined_anchors_clipped"]
-            r = results["proposals"][:limit]
+            #r = results["proposals"][:limit]
+            
             r = r * np.array([1024, 1024, 1024, 1024])
 
             scores = ((np.sort(results['rpn_class'][:, :, 1]
@@ -187,27 +190,29 @@ for video_id, video_dir in enumerate(video_directories):
             # from 1024 x 1024 to dim[0] x dim[1]
 
             r = ((r - np.array((aver_pad_y, aver_pad_x,
-                               aver_pad_y, aver_pad_x)))/scale).squeeze()
+                                aver_pad_y, aver_pad_x)))/scale).squeeze()
 
             # Clears the image list after evaluation
             image_list.clear()
 
-            with open(LOGS_DIR+"/"+video_names[video_id]+"_rpn", 'a+') as f:
+            #with open(LOGS_DIR+"/"+video_names[video_id]+"_rpn", 'a+') as f:
+            with open(LOGS_DIR+"/"+video_names[video_id]+"_refinedanchorsclipped", 'a+') as f:
                 for prop_id, proposals in enumerate(r):
                     y1, x1, y2, x2 = proposals
                     x, y, w, h = coco_to_voc_bbox_converter(y1, x1, y2, x2)
-                    if x < 0:
-                        x = 0
-                    if y < 0:
-                        y = 0
-                    if x + w > dims[1]:
-                        w = dims[1] - x
-                    if y + h > dims[0]:
-                        h = dims[0] - y
+                    #if x < 0:
+                    #    x = 0
+                    #if y < 0:
+                    #    y = 0
+                    #if x + w > dims[1]:
+                    #    w = dims[1] - x
+                    #if y + h > dims[0]:
+                    #    h = dims[0] - y
                     things_to_write = "{}\t{}\t{}\t{}\t{}\t{}\t{}\n".format(
                         format(image_id, '.8s'), prop_id+1,
-                        format(x, '.2f'), format(y, '.2f'),
-                        format(w, '.2f'), format(h, '.2f'),
+                        x, y, w, h,
+                        #format(x, '.8f'), format(y, '.8f'),
+                        #format(w, '.8f'), format(h, '.8f'),
                         format(scores[prop_id], '.8f'))
                     f.write(things_to_write)
             r = None

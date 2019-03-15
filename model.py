@@ -490,7 +490,7 @@ def clip_boxes_graph(boxes, window):
     clipped.set_shape((clipped.shape[0], 4))
     return clipped
 
-
+    
 class ProposalLayer(KE.Layer):
     """Receives anchor scores and selects a subset to pass as proposals
     to the second stage. Filtering is done based on anchor scores and
@@ -568,6 +568,81 @@ class ProposalLayer(KE.Layer):
     def compute_output_shape(self, input_shape):
         return (None, self.proposal_count, 4)
 
+
+class RefinedAnchorsClippedLayer(KE.Layer):
+    """
+    Performs the ProposalLayer until the refined anchors clipped operation. 
+    Inputs:
+        rpn_probs: [batch, anchors, (bg prob, fg prob)]
+        rpn_bbox: [batch, anchors, (dy, dx, log(dh), log(dw))]
+        anchors: [batch, (y1, x1, y2, x2)] anchors in normalized coordinates
+    Returns:
+        Proposals in normalized coordinates [batch, n_refinedanchorsclipped, (y1, x1, y2, x2)]
+    """
+
+    def __init__(self, proposal_count, nms_threshold, config=None, **kwargs):
+        super(RefinedAnchorsClippedLayer, self).__init__(**kwargs)
+        self.config = config
+        self.proposal_count = proposal_count
+        self.nms_threshold = nms_threshold
+
+    def call(self, inputs):
+        # Box Scores. Use the foreground class confidence. [Batch, num_rois, 1]
+        scores = inputs[0][:, :, 1]
+        # Box deltas [batch, num_rois, 4]
+        deltas = inputs[1]
+        deltas = deltas * np.reshape(self.config.RPN_BBOX_STD_DEV, [1, 1, 4])
+        # Anchors
+        anchors = inputs[2]
+
+        # Improve performance by trimming to top anchors by score
+        # and doing the rest on the smaller subset.
+        pre_nms_limit = tf.minimum(1000, tf.shape(anchors)[1])
+        ix = tf.nn.top_k(scores, pre_nms_limit, sorted=True,
+                         name="top_anchors").indices
+        scores = utils.batch_slice([scores, ix], lambda x, y: tf.gather(x, y),
+                                   self.config.IMAGES_PER_GPU)
+        deltas = utils.batch_slice([deltas, ix], lambda x, y: tf.gather(x, y),
+                                   self.config.IMAGES_PER_GPU)
+        pre_nms_anchors = utils.batch_slice([anchors, ix], lambda a, x: tf.gather(a, x),
+                                    self.config.IMAGES_PER_GPU,
+                                    names=["pre_nms_anchors"])
+
+        # Apply deltas to anchors to get refined anchors.
+        # [batch, N, (y1, x1, y2, x2)]
+        boxes = utils.batch_slice([pre_nms_anchors, deltas],
+                                  lambda x, y: apply_box_deltas_graph(x, y),
+                                  self.config.IMAGES_PER_GPU,
+                                  names=["refined_anchors"])
+
+        # Clip to image boundaries. Since we're in normalized coordinates,
+        # clip to 0..1 range. [batch, N, (y1, x1, y2, x2)]
+        window = np.array([0, 0, 1, 1], dtype=np.float32)
+        boxes = utils.batch_slice(boxes,
+                                  lambda x: clip_boxes_graph(x, window),
+                                  self.config.IMAGES_PER_GPU,
+                                  names=["refined_anchors_clipped"])
+
+        # Filter out small boxes
+        # According to Xinlei Chen's paper, this reduces detection accuracy
+        # for small objects, so we're skipping it.
+
+        # Non-max suppression
+        #def nms(boxes, scores):
+        #    indices = tf.image.non_max_suppression(
+        #        boxes, scores, self.proposal_count,
+        #        self.nms_threshold, name="rpn_non_max_suppression")
+        #    proposals = tf.gather(boxes, indices)
+        #    # Pad if needed
+        #    padding = tf.maximum(self.proposal_count - tf.shape(proposals)[0], 0)
+        #    proposals = tf.pad(proposals, [(0, padding), (0, 0)])
+        #    return proposals
+        #proposals = utils.batch_slice([boxes, scores], nms,
+        #                              self.config.IMAGES_PER_GPU)
+        return boxes
+
+    def compute_output_shape(self, input_shape):
+        return (None, 1000, 4)
 
 ############################################################
 #  ROIAlign Layer
@@ -1075,6 +1150,8 @@ class ParticleSuppressLayer(KE.Layer):
         rpn_rois = inputs[0]
         particles = inputs[1]
 
+        #particles = tf.Print(particles, [particles], summarize=8, first_n=64)
+        
         # def iou_calc(bbox1, bbox2):
         #     print(K.int_shape(bbox1))
         #     print(K.int_shape(bbox2))
@@ -2147,7 +2224,7 @@ class MaskRCNN():
         config: A Sub-class of the Config class
         model_dir: Directory to save training logs and trained weights
         """
-        assert mode in ['training', 'inference', 'extension', 'correlate']
+        assert mode in ['training', 'inference', 'extension', 'inference_rpn']
         self.mode = mode
         self.config = config
         self.model_dir = model_dir
@@ -2160,7 +2237,7 @@ class MaskRCNN():
             mode: Either "training" or "inference". The inputs and
                 outputs of the model differ accordingly.
         """
-        assert mode in ['training', 'inference', 'extension', 'correlate']
+        assert mode in ['training', 'inference', 'extension', 'inference_rpn']
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]
@@ -2211,7 +2288,7 @@ class MaskRCNN():
         elif mode == "extension":
             # Anchors in normalized coordinates
             support_particles = KL.Input(batch_shape=[None, config.POST_PS_ROIS_INFERENCE, 4],
-                                         name="particles", dtype=tf.float32)
+                                         name="particles")#, dtype=tf.float32)
             input_anchors = KL.Input(shape=[None, 4], name="input_anchors")
 
             # Converting detections into TF Tensors.
@@ -2221,13 +2298,8 @@ class MaskRCNN():
             # support_particles = KL.Lambda(lambda x: tf.Variable(support_particles),
             #                               name="particles")(input_image)
 
-        elif mode == "correlate":
+        elif mode == "inference_rpn":
             input_anchors = KL.Input(shape=[None, 4], name="input_anchors")
-            fpn2 = KL.Input(shape=[None, 256, 256, 256], name="input_fpn2")
-            fpn3 = KL.Input(shape=[None, 128, 128, 256], name="input_fpn3")
-            fpn4 = KL.Input(shape=[None, 64, 64, 256], name="input_fpn4")
-            fpn5 = KL.Input(shape=[None, 32, 32, 256], name="input_fpn5")
-            raise NotImplementedError
 
         # Build the shared convolutional layers.
         # Bottom-up Layers
@@ -2326,11 +2398,21 @@ class MaskRCNN():
         # and zero padded.
         proposal_count = config.POST_NMS_ROIS_TRAINING if mode == "training"\
             else config.POST_NMS_ROIS_INFERENCE
-        rpn_rois = ProposalLayer(
-            proposal_count=proposal_count,
-            nms_threshold=config.RPN_NMS_THRESHOLD,
-            name="ROI",
-            config=config)([rpn_class, rpn_bbox, anchors])
+        if mode == "inference_rpn":
+            rpn_bbox = RefinedAnchorsClippedLayer(
+                proposal_count=1000,
+                nms_threshold=config.RPN_NMS_THRESHOLD,
+                name="ROI",
+                config=config)([rpn_class, rpn_bbox, anchors])
+            model = KM.Model([input_image, input_image_meta, input_anchors],
+                                         [rpn_class_logits, rpn_class, rpn_bbox],
+                                         name='mask_rcnn')
+        else:
+            rpn_rois = ProposalLayer(
+                proposal_count=proposal_count,
+                nms_threshold=config.RPN_NMS_THRESHOLD,
+                name="ROI",
+                config=config)([rpn_class, rpn_bbox, anchors])
 
         if mode == "training":
             # Class ID mask to mark class IDs supported by the dataset the image
@@ -2436,10 +2518,7 @@ class MaskRCNN():
                                  mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
 
-        elif mode == "correlate":
-            raise NotImplementedError
-
-        else:
+        elif mode == "inference":
             # Network Heads
             # Proposal classifier and BBox regressor heads
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
@@ -2883,7 +2962,7 @@ class MaskRCNN():
         logits: [N, 81] class-based activations for each detection
         particles: Numpy array of (N, config.POST_PS_ROIS_INFERENCE, 4).
         """
-        all_modes = ["inference", "extension", "correlate"]
+        all_modes = ["inference", "extension", "inference_rpn"]
         assert self.mode in all_modes,\
             "Create model in inference or extension mode."
         assert len(images) == self.config.BATCH_SIZE,\
@@ -2929,24 +3008,38 @@ class MaskRCNN():
             detections, mrcnn_class_logits, _, mrcnn_mask, _, _, _ =\
                 self.keras_model.predict([molded_images, image_metas, anchors, particles],
                                          verbose=0)
-        elif self.mode == "correlate":
-            raise NotImplementedError
+        elif self.mode == "inference_rpn":
+            rpn_class_logits, rpn_class, refined_anchors =\
+                self.keras_model.predict([molded_images,image_metas, anchors], verbose=0)
 
         # Process detections
         results = []
-        for i, image in enumerate(images):
-            final_rois, final_class_ids, final_scores, final_masks, final_logits =\
-                self.unmold_detections(detections[i], mrcnn_mask[i],
-                                       image.shape, molded_images[i].shape,
-                                       windows[i],
-                                       filter_background=self.config.FILTER_BACKGROUND)
-            results.append({
-                "rois": final_rois,
-                "class_ids": final_class_ids,
-                "scores": final_scores,
-                "masks": final_masks,
-                "logits": final_logits,
-            })
+        if self.mode == "inference" or self.mode == "extension":
+            for i, image in enumerate(images):
+                final_rois, final_class_ids, final_scores, final_masks, final_logits =\
+                    self.unmold_detections(detections[i], mrcnn_mask[i],
+                                           image.shape, molded_images[i].shape,
+                                           windows[i],
+                                           filter_background=self.config.FILTER_BACKGROUND)
+                results.append({
+                    "rois": final_rois,
+                    "class_ids": final_class_ids,
+                    "scores": final_scores,
+                    "masks": final_masks,
+                    "logits": final_logits,
+                })
+        elif self.mode == "inference_rpn":
+            for i, image in enumerate(images):
+                refined_anchors = utils.norm2orig(refined_anchors[i], windows[i],
+                                                  image.shape, 
+                                                  molded_images[i].shape)
+                results.append({
+                    "rois": refined_anchors,
+                    "scores": rpn_class_logits[i],
+                    "class_ids": rpn_class[i],
+                    "logits": rpn_class_logits[i],
+                })
+                
         return results
 
     def detect_molded(self, molded_images, image_metas, verbose=0):
@@ -2961,7 +3054,7 @@ class MaskRCNN():
         scores: [N] float probability scores for the class IDs
         masks: [H, W, N] instance binary masks
         """
-        all_modes = ["inference", "extension", "correlate"]
+        all_modes = ["inference", "extension", "void"]
         assert self.mode in all_modes, "Create model in inference mode."
         assert len(molded_images) == self.config.BATCH_SIZE,\
             "Number of images must be equal to BATCH_SIZE"
