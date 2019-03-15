@@ -1,7 +1,18 @@
 # Differences From the Original Branch
 
-A baseline code for expanding the MS COCO Dataset with your own data was added. In addition, Group Normalization layers can be initialized instead of using Batch Normalization layers [1]. Then, learning rate parameter was modified to 0.025 for a batch size of 2 [3]. Lastly, shortcut connections, mask fusion architecture and bottom-up path augmentations were implemented; however, bottom-up augmentations were not tested due to OOM issues [2].  
+* We added some properties exclusively for video processing. First of all, it is possible to use our tool for extracting the bounding box predictions of Mask R-CNN for each video frame of all videos of a dataset. This can be done by using evaluation.py file and the command should be specified such that:
+  
+`python3 evaluation.py --mode="inference" --test-dataset-dir="path/to/Dataset/" --model-dir="mask_rcnn_coco.h5"`
 
+*  Furthermore, given a set of region of interests for each frame, it is possible to extract the output using the extension mode of evaluation.py. Assuming the project tree is specified as below, the command to extract the bounding box predictions given the region of interests CNN is specified as:
+
+`python3 evaluation.py --mode="extension" --test-dataset-dir="path/to/Dataset/" --model-dir="mask_rcnn_coco.h5 --particles-dir="path/to/RoIs"`
+
+*  This command has a couple of requirements. First of all, region of interests should be specified as **videoname_roi_tobe.txt** in the RoIs folder. RoI's should be written line-by-line for each video frame for a particular video. Then for all video frames, the region of interests should be finite and the location should be specified in $[x, y, w, h]$ format, where $x$ and $y$ is the top left corner's coordinate and $w$ and $h$ is the width and height of the region. These 4 variables has to be normalized between $[0, 1]$. Then, POST_PS_ROIS_INFERENCE and DETECTION_MAX_INSTANCES variables should be changed to number of given region of interests, which is a constant. If there is less region of interests than  
+
+*  A baseline code for expanding the MS COCO Dataset with your own data was added. In addition, Group Normalization layers can be initialized instead of using Batch Normalization layers [1]. Then, learning rate parameter was modified to 0.025 for a batch size of 2 [3]. Lastly, shortcut connections, mask fusion architecture and bottom-up path augmentations were implemented; however, bottom-up augmentations were not tested due to OOM issues [2].  
+
+  
 [1]: [Group Normalization] --> https://arxiv.org/pdf/1803.08494.pdf
 
 [2]: [PANet] --> https://arxiv.org/pdf/1803.01534.pdf
@@ -216,3 +227,4 @@ tensorboard --logdir=run1:logs/coco2018... --port 6006
 
 # How To Convert From Semiautomatic LabelMe Format to MS COCO JSON?
 Refer to the inspect_json.ipynb guideline. 
+
