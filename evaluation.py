@@ -74,7 +74,7 @@ if args.mode == "extension":
 
     # Check for if particles for all videos are present.
     particles_videoname = sorted(os.listdir(PARTICLE_DIR))
-    videonames = ([x.split("_", maxsplit=3)[0] for x in particles_videoname])
+    videonames = ([x.split("_", maxsplit=3)[1] for x in particles_videoname])
 
     assert frame_folder_names == videonames, "Some particle files or videos "\
                                             "are missing"
@@ -210,7 +210,7 @@ for video_id, video_dir in enumerate(video_directories):
         particles = particle_array_const(particles_full_path[video_id],
                                          os.path.join(video_dir, os.listdir(video_dir)[0]))
     with open(MODEL_DIR+"/"+video_names[video_id]+"_mask_RA_nms07", 'a+') as f:
-        f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
+        #f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
         print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
         print("Video name: {}".format(video_dir))
         image_list = []
@@ -237,7 +237,7 @@ for video_id, video_dir in enumerate(video_directories):
                 print("Processed Frame ID: {}/{}".format(d+1, len(sorted_image_ids)))
                 if args.mode == "extension":
                     results = model.detect(image_list, verbose=1, particles=particles[d])
-                elif args.mode == "inference" or args.mode == "inference_rpn":
+                elif args.mode == "inference" or args.mode == "inference_rpn" or args.mode == "tavot":
                     results = model.detect(image_list, verbose=1)
                 r = results[0]
                 image_list.clear()

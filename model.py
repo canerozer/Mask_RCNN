@@ -1150,45 +1150,36 @@ class ParticleSuppressLayer(KE.Layer):
         rpn_rois = inputs[0]
         particles = inputs[1]
 
-        #particles = tf.Print(particles, [particles], summarize=8, first_n=64)
-        
-        # def iou_calc(bbox1, bbox2):
-        #     print(K.int_shape(bbox1))
-        #     print(K.int_shape(bbox2))
-        #
-        #     inter = tf.multiply(bbox1[:,:,0] - bbox2[:, :, 2],
-        #         bbox1[:,:,1] - bbox2[:, :, 3])
-        #     return inter
-
-        #ious = overlaps_graph(rpn_rois[0], particles[0])
-        #all_samples = tf.concat([rpn_rois, particles], 1)
-        #all_samples = tf.Print(all_samples, [all_samples])
         return particles
-
-        #
-        # # Get windows of images in normalized coordinates. Windows are the area
-        # # in the image that excludes the padding.
-        # # Use the shape of the first image in the batch to normalize the window
-        # # because we know that all images get resized to the same size.
-        # m = parse_image_meta_graph(image_meta)
-        # image_shape = m['image_shape'][0]
-        # window = norm_boxes_graph(m['window'], image_shape[:2])
-        #
-        # # Run detection refinement graph on each item in the batch
-        # detections_batch = utils.batch_slice(
-        #     [rois, mrcnn_class, mrcnn_bbox, window],
-        #     lambda x, y, w, z: refine_detections_graph(x, y, w, z, self.config),
-        #     self.config.IMAGES_PER_GPU)
-        #
-        # # Reshape output
-        # # [batch, num_detections, (y1, x1, y2, x2, class_score)] in
-        # # normalized coordinates
-        # return tf.reshape(
-        #     detections_batch,
-        #     [self.config.BATCH_SIZE, self.config.DETECTION_MAX_INSTANCES, self.config.NUM_CLASSES+6])
 
     def compute_output_shape(self, input_shape):
         return (None, self.config.POST_PS_ROIS_INFERENCE, 4)
+
+############################################################
+#  RoI Sampler Layer
+############################################################
+    """Samples different region of interests using a state vector
+
+    """
+class ROISamplerLayer(KE.Layer):
+    def __init__(self, config=None, **kwargs):
+        super(ROISamplerLayer, self).__init__(**kwargs)
+        self.config = config
+
+    def call(self, inputs):
+        outputs = utils.batch_slice(inputs, roi_sampler_graph,
+                                    self.config.IMAGES_PER_GPU)
+        return outputs
+
+    def compute_output_shape(self, input_shape):
+        return (None, self.config.POST_PS_ROIS_INFERENCE, 4)
+
+def roi_sampler_graph(rois):
+    mean = tf.reduce_mean(rois[0], 0)
+    std = (0.1, 0.1, 0.1, 0.1)
+    particles = tf.random_normal((1000, 4),
+                                mean=mean, stddev=std)
+    return particles
 
 ############################################################
 #  Region Proposal Network (RPN)
@@ -2224,7 +2215,7 @@ class MaskRCNN():
         config: A Sub-class of the Config class
         model_dir: Directory to save training logs and trained weights
         """
-        assert mode in ['training', 'inference', 'extension', 'inference_rpn']
+        assert mode in ['training', 'inference', 'extension', 'inference_rpn', 'tavot']
         self.mode = mode
         self.config = config
         self.model_dir = model_dir
@@ -2237,7 +2228,7 @@ class MaskRCNN():
             mode: Either "training" or "inference". The inputs and
                 outputs of the model differ accordingly.
         """
-        assert mode in ['training', 'inference', 'extension', 'inference_rpn']
+        assert mode in ['training', 'inference', 'extension', 'inference_rpn', 'tavot']
 
         # Image size must be dividable by 2 multiple times
         h, w = config.IMAGE_SHAPE[:2]
@@ -2299,6 +2290,9 @@ class MaskRCNN():
             #                               name="particles")(input_image)
 
         elif mode == "inference_rpn":
+            input_anchors = KL.Input(shape=[None, 4], name="input_anchors")
+
+        elif mode == "tavot":
             input_anchors = KL.Input(shape=[None, 4], name="input_anchors")
 
         # Build the shared convolutional layers.
@@ -2546,6 +2540,37 @@ class MaskRCNN():
             model = KM.Model([input_image, input_image_meta, input_anchors],
                              [detections, mrcnn_class_logits, mrcnn_bbox,
                                  mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
+                             name='mask_rcnn')
+
+        elif mode == "tavot":
+            sampled_rois = ROISamplerLayer(config, name="ROISampler")(rpn_rois)
+            # Network Heads
+            # Proposal classifier and BBox regressor heads
+            mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
+                fpn_classifier_graph(sampled_rois, mrcnn_feature_maps, input_image_meta,
+                                     config.POOL_SIZE, config.NUM_CLASSES,
+                                     train_bn=config.TRAIN_BN,
+                                     train_gn=config.TRAIN_GN)
+
+            # Detections
+            # output is [batch, num_detections, (y1, x1, y2, x2, class_id, score)] in
+            # normalized coordinates
+            detections = DetectionLayer(config, name="mrcnn_detection")(
+                [sampled_rois, mrcnn_class, mrcnn_bbox, input_image_meta])
+
+            # Create masks for detections
+            detection_boxes = KL.Lambda(lambda x: x[..., :4])(detections)
+            mrcnn_mask = build_fpn_mask_graph(detection_boxes, mrcnn_feature_maps,
+                                              input_image_meta,
+                                              config.MASK_POOL_SIZE,
+                                              config.NUM_CLASSES,
+                                              train_bn=config.TRAIN_BN,
+                                              train_gn=config.TRAIN_GN,
+                                              mask_fusion=config.FC_MASK_FUSION)
+
+            model = KM.Model([input_image, input_image_meta, input_anchors],
+                             [detections, mrcnn_class_logits, mrcnn_bbox,
+                                 mrcnn_mask, sampled_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
 
         # Add multi-GPU support.
@@ -2962,7 +2987,7 @@ class MaskRCNN():
         logits: [N, 81] class-based activations for each detection
         particles: Numpy array of (N, config.POST_PS_ROIS_INFERENCE, 4).
         """
-        all_modes = ["inference", "extension", "inference_rpn"]
+        all_modes = ["inference", "extension", "inference_rpn", "tavot"]
         assert self.mode in all_modes,\
             "Create model in inference or extension mode."
         assert len(images) == self.config.BATCH_SIZE,\
@@ -2988,6 +3013,7 @@ class MaskRCNN():
 
         # Anchors
         anchors = self.get_anchors(image_shape)
+
         # Duplicate across the batch dimension because Keras requires it
         # TODO: can this be optimized to avoid duplicating the anchors?
         anchors = np.broadcast_to(anchors, (self.config.BATCH_SIZE,) + anchors.shape)
@@ -3011,10 +3037,13 @@ class MaskRCNN():
         elif self.mode == "inference_rpn":
             rpn_class_logits, rpn_class, refined_anchors =\
                 self.keras_model.predict([molded_images,image_metas, anchors], verbose=0)
+        elif self.mode == "tavot":
+            detections, mrcnn_class_logits, _, mrcnn_mask, _, _, _ =\
+                self.keras_model.predict([molded_images, image_metas, anchors], verbose=0)
 
         # Process detections
         results = []
-        if self.mode == "inference" or self.mode == "extension":
+        if self.mode == "inference" or self.mode == "extension" or self.mode == "tavot":
             for i, image in enumerate(images):
                 final_rois, final_class_ids, final_scores, final_masks, final_logits =\
                     self.unmold_detections(detections[i], mrcnn_mask[i],
@@ -3054,7 +3083,7 @@ class MaskRCNN():
         scores: [N] float probability scores for the class IDs
         masks: [H, W, N] instance binary masks
         """
-        all_modes = ["inference", "extension", "void"]
+        all_modes = ["inference", "extension", "tavot", "void"]
         assert self.mode in all_modes, "Create model in inference mode."
         assert len(molded_images) == self.config.BATCH_SIZE,\
             "Number of images must be equal to BATCH_SIZE"
