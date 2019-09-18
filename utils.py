@@ -980,3 +980,18 @@ def norm2orig(boxes, window, image_shape, original_image_shape):
     # Convert boxes to pixel coordinates on the original image
     boxes = denorm_boxes(boxes, original_image_shape[:2])
     return boxes
+
+############################################################
+#   evaluation.py
+############################################################
+def mkdir_ifnotfound(loc):
+    if not os.path.isdir(loc):
+        os.mkdir(loc)
+
+def str2bool(v):
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
