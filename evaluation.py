@@ -19,15 +19,16 @@ import visualize
 import time
 from config import Config
 
+
 # Test some videos
 parser = argparse.ArgumentParser(description='Test some videos.')
-parser.add_argument("--mode", required=True,
-                    metavar="<mode>",
-                    help="Indicate the model mode as 'inference',"
-                         "'extension' or 'inference_rpn'.")
 parser.add_argument('test_dataset_dir', metavar='TD', type=str,
                     default="/home/mspr/Datasets/test_dataset",
                     help='enter the test directory')
+parser.add_argument("--mode", required=True,
+                    metavar="<mode>",
+                    help="Indicate the model mode as 'inference' or"
+                         "'extension'.")
 parser.add_argument('--model-dir', metavar='MD', type=str,
                     default=None,
                     help='enter the test directory')
@@ -35,6 +36,9 @@ parser.add_argument('--particles-dir', metavar='PD', type=str,
                     default=None,
                     help='folder directory for importing particle filter'
                          ' proposals when the mode is set to extension')
+parser.add_argument("--segment", default=False, type=utils.str2bool,
+                    metavar="<segment>",
+                    help="Save segmentation results for each detection")
 
 args = parser.parse_args()
 
@@ -74,7 +78,7 @@ if args.mode == "extension":
 
     # Check for if particles for all videos are present.
     particles_videoname = sorted(os.listdir(PARTICLE_DIR))
-    videonames = ([x.split("_", maxsplit=3)[1] for x in particles_videoname])
+    videonames = ([x.split("_", maxsplit=3)[0] for x in particles_videoname])
 
     assert frame_folder_names == videonames, "Some particle files or videos "\
                                             "are missing"
@@ -90,7 +94,8 @@ class InferenceConfig(Config):
     NAME = "coco_evaluation"
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
-    NUM_CLASSES = 80 + 1
+    #NUM_CLASSES = 80 + 1
+    NUM_CLASSES = 1 + 1
 
     DETECTION_MIN_CONFIDENCE = 0.0
     DETECTION_NMS_THRESHOLD = 0.7
@@ -206,10 +211,11 @@ def particle_array_const(particle_file, first_img, config=config):
 video_counter = 0
 
 for video_id, video_dir in enumerate(video_directories):
+    video_name = video_names[video_id]
     if args.mode == "extension":
         particles = particle_array_const(particles_full_path[video_id],
                                          os.path.join(video_dir, os.listdir(video_dir)[0]))
-    with open(MODEL_DIR+"/"+video_names[video_id]+"_mask_RA_nms07", 'a+') as f:
+    with open(MODEL_DIR+"/"+video_name+"_mask_RA_nms07", 'a+') as f:
         #f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
         print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
         print("Video name: {}".format(video_dir))
@@ -237,7 +243,7 @@ for video_id, video_dir in enumerate(video_directories):
                 print("Processed Frame ID: {}/{}".format(d+1, len(sorted_image_ids)))
                 if args.mode == "extension":
                     results = model.detect(image_list, verbose=1, particles=particles[d])
-                elif args.mode == "inference" or args.mode == "inference_rpn" or args.mode == "tavot":
+                elif args.mode == "inference" or args.mode == "tavot":
                     results = model.detect(image_list, verbose=1)
                 r = results[0]
                 image_list.clear()
@@ -251,13 +257,8 @@ for video_id, video_dir in enumerate(video_directories):
                     # Arguments of top-5
                     p_c_ids = np.argsort(-r['logits'][score_id])[:5]
 
-                    if args.mode == "inference_rpn":
-                        diff = 3
-                        predicted_class_id = np.pad(predicted_class_id, (0,diff), 'constant', constant_values=0)
-                        probs = np.pad(probs, (0,diff), 'constant', constant_values=0)
-                        p_c_ids = np.pad(p_c_ids, (0,diff), 'constant', constant_values=0)
                     # When # of classes are less than 5
-                    elif config.NUM_CLASSES < 5:
+                    if config.NUM_CLASSES < 5:
                         diff = 5 - config.NUM_CLASSES
                         predicted_class_id = np.pad(predicted_class_id, (0,diff), 'constant', constant_values=0)
                         probs = np.pad(probs, (0,diff), 'constant', constant_values=0)
@@ -279,5 +280,12 @@ for video_id, video_dir in enumerate(video_directories):
                                     format(probs[3], '.8f'), p_c_ids[4],
                                     format(probs[4], '.8f'))
                     f.write(things_to_write)
+                    if args.segment:
+                        dr = r['masks'][:,:,score_id] * 255
+                        out_fn = image_id[:-4] + "_mask_" +\
+                                 str(score_id) + ".png"
+                        out_dirpath = os.path.join(MODEL_DIR, video_name, out_fn)
+                        utils.mkdir_ifnotfound(os.path.dirname(out_dirpath))
+                        skimage.io.imsave(out_dirpath, dr)
 
                 print("")
