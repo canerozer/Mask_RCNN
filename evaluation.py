@@ -18,6 +18,7 @@ import model as modellib
 import visualize
 import time
 from config import Config
+from utils import particle_array_const
 
 
 # Test some videos
@@ -28,7 +29,7 @@ parser.add_argument('test_dataset_dir', metavar='TD', type=str,
 parser.add_argument("--mode", required=True,
                     metavar="<mode>",
                     help="Indicate the model mode as 'inference' or"
-                         "'extension'.")
+                         "'extension' or 'tavot'.")
 parser.add_argument('--model-dir', metavar='MD', type=str,
                     default=None,
                     help='enter the test directory')
@@ -39,6 +40,9 @@ parser.add_argument('--particles-dir', metavar='PD', type=str,
 parser.add_argument("--segment", default=False, type=utils.str2bool,
                     metavar="<segment>",
                     help="Save segmentation results for each detection")
+parser.add_argument("--tau", default=0.3, type=float,
+                    metavar="<tau>",
+                    help="IoU thr of LF block")
 
 args = parser.parse_args()
 
@@ -47,7 +51,7 @@ args = parser.parse_args()
 ROOT_DIR = os.getcwd()
 
 # Directory to save logs and trained model
-MODEL_DIR = os.path.join(ROOT_DIR, "logs")
+LOGS_DIR = os.path.join(ROOT_DIR, "logs")
 
 # Local path to trained weights file
 assert args.model_dir is not None
@@ -87,6 +91,7 @@ if args.mode == "extension":
                            particles_videoname]
     # Importing text files to construct numpy arrays
 
+
 class InferenceConfig(Config):
     # Set batch size to 1 since we'll be running inference on
     # one image at a time. Batch size = GPU_COUNT * IMAGES_PER_GPU
@@ -94,8 +99,8 @@ class InferenceConfig(Config):
     NAME = "coco_evaluation"
     GPU_COUNT = 1
     IMAGES_PER_GPU = 1
-    #NUM_CLASSES = 80 + 1
-    NUM_CLASSES = 1 + 1
+    NUM_CLASSES = 80 + 1
+    #NUM_CLASSES = 1 + 1
 
     DETECTION_MIN_CONFIDENCE = 0.0
     DETECTION_NMS_THRESHOLD = 0.7
@@ -106,6 +111,7 @@ class InferenceConfig(Config):
         POST_PS_ROIS_INFERENCE = 1000
         #DETECTION_MAX_INSTANCES = 400
         DETECTION_MAX_INSTANCES = 1000
+        IOU_THR = args.tau
     elif args.mode == "inference":
         POST_PS_ROIS_INFERENCE = 1000
         DETECTION_MAX_INSTANCES = 1000
@@ -123,10 +129,9 @@ config = InferenceConfig()
 config.display()
 
 # Create model object in inference mode.
-model = modellib.MaskRCNN(mode=args.mode, model_dir=MODEL_DIR, config=config)
+model = modellib.MaskRCNN(mode=args.mode, model_dir=LOGS_DIR, config=config)
 
 # Load weights trained on MS-COCO
-print("Loading weights")
 model.load_weights(COCO_MODEL_PATH, by_name=True)
 
 # COCO Class names
@@ -178,34 +183,6 @@ def softmax(arr):
     probs = np.exp(arr)/(np.sum(np.exp(arr), axis=1)[:, np.newaxis])
     return probs
 
-def particle_array_const(particle_file, first_img, config=config):
-    first_img = skimage.io.imread(first_img)
-    dim_y, dim_x, _ = first_img.shape
-
-    particles = []
-    with open(particle_file, "r+") as f:
-        particles.append(f.read().split("\n"))
-    particles = particles[0][:-1]
-    particles = [temp.split(" ") for temp in particles]
-    particles_np = np.array(particles).astype(np.float64)
-
-    # Get the scale and padding parameters by using resize_image.
-    _, _, scale, pad, _ = utils.resize_image(first_img,
-                                             min_dim=config.IMAGE_MIN_DIM,
-                                             max_dim=config.IMAGE_MAX_DIM,
-                                             min_scale=config.IMAGE_MIN_SCALE,
-                                             mode="square")
-
-    # Roughly calculate padding across different axises.
-    aver_pad_y = (pad[0][0] + pad[0][1])/2
-    aver_pad_x = (pad[1][0] + pad[1][1])/2
-
-    particles_np *= np.array((dim_y, dim_x, dim_y, dim_x))
-    particles_np = (particles_np * scale) + np.array((aver_pad_y, aver_pad_x, aver_pad_y, aver_pad_x))
-    particles_np /= np.array((1024, 1024, 1024, 1024))
-    particles_np = particles_np.reshape((-1, config.POST_PS_ROIS_INFERENCE, 4))
-    return particles_np
-
 # Start testifying images for every frame in a particular folder_name.
 # When enumerator hits the batch size number, the model will begin detection.
 video_counter = 0
@@ -214,8 +191,10 @@ for video_id, video_dir in enumerate(video_directories):
     video_name = video_names[video_id]
     if args.mode == "extension":
         particles = particle_array_const(particles_full_path[video_id],
-                                         os.path.join(video_dir, os.listdir(video_dir)[0]))
-    with open(MODEL_DIR+"/"+video_name+"_mask_RA_nms07", 'a+') as f:
+                                         os.path.join(video_dir, os.listdir(video_dir)[0]),
+                                         config=config)
+    with open(LOGS_DIR+"/"+"TAVOT_tau"+str(args.tau)+
+               "/"+video_name+"_tavot_LF_nms07", 'a+') as f:
         #f.write("fn\tx\ty\tw\th\tobj_score\tlbl\tc1\tconf_1\t\tc2\tconf_2\t\tc3\tconf_3\t\tc4\tconf_4\t\tc5\tconf_5\n")
         print("Video in Process: {}/{}".format(video_id+1, len(video_directories)))
         print("Video name: {}".format(video_dir))
@@ -243,8 +222,10 @@ for video_id, video_dir in enumerate(video_directories):
                 print("Processed Frame ID: {}/{}".format(d+1, len(sorted_image_ids)))
                 if args.mode == "extension":
                     results = model.detect(image_list, verbose=1, particles=particles[d])
-                elif args.mode == "inference" or args.mode == "tavot":
+                elif args.mode == "inference":
                     results = model.detect(image_list, verbose=1)
+                elif args.mode == "tavot":
+                    results = model.detect(image_list, verbose=1, prev_output=prev_output)
                 r = results[0]
                 image_list.clear()
                 for score_id, scores in enumerate(r['scores']):
@@ -284,7 +265,7 @@ for video_id, video_dir in enumerate(video_directories):
                         dr = r['masks'][:,:,score_id] * 255
                         out_fn = image_id[:-4] + "_mask_" +\
                                  str(score_id) + ".png"
-                        out_dirpath = os.path.join(MODEL_DIR, video_name, out_fn)
+                        out_dirpath = os.path.join(LOGS_DIR, video_name, out_fn)
                         utils.mkdir_ifnotfound(os.path.dirname(out_dirpath))
                         skimage.io.imsave(out_dirpath, dr)
 

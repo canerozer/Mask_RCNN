@@ -2123,10 +2123,12 @@ def data_generator(dataset, config, shuffle=True, augment=False, augmentation=No
             if error_count > 5:
                 raise
 
-def pad_up_to(t, max_in_dims, constant_values):
+
+def pad_up_to(t, max_in_dims, constant_values, **kwargs):
     s = tf.shape(t)
     paddings = [[0, m-s[i]] for (i,m) in enumerate(max_in_dims)]
-    return tf.pad(t, paddings, 'CONSTANT', constant_values=constant_values)
+    return tf.pad(t, paddings, 'CONSTANT', constant_values=constant_values, **kwargs)
+
 
 def particle_layer_function(inputs, N, iou_thr):
     IOU_THRESHOLD = iou_thr
@@ -2139,56 +2141,51 @@ def particle_layer_function(inputs, N, iou_thr):
     tf_indices = tf.where(tf.greater(iou_matrix, IOU_THRESHOLD))
     tmp_indices = tf.split(tf_indices, 2, axis=1)
 
-    unq_rpn_roi_indices, discard = tf.unique(tf.squeeze(tmp_indices[0]))
-    unq_particle_roi_indices, discard = tf.unique(tf.squeeze(tmp_indices[1]))
+    unq_rpn_roi_indices, _ = tf.unique(tf.squeeze(tmp_indices[0], axis=1))
+    unq_particle_roi_indices, _ = tf.unique(tf.squeeze(tmp_indices[1], axis=1))
 
     output_rpn_rois = tf.gather(rpn_rois, unq_rpn_roi_indices, axis=1)
     output_particle_rois = tf.gather(particles, unq_particle_roi_indices, axis=1)
     output_rois = tf.concat([output_rpn_rois, output_particle_rois], axis=1)
-    output_count = keras.backend.int_shape(output_rois)[1]
+
+    max_rpn_ious = tf.math.reduce_max(iou_matrix, axis=1)
+    max_particle_ious = tf.math.reduce_max(iou_matrix, axis=0)
+
+    rpn_ious = tf.gather(max_rpn_ious, unq_rpn_roi_indices)
+    particle_ious = tf.gather(max_particle_ious, unq_particle_roi_indices)
+    ious = tf.concat([rpn_ious, particle_ious], axis=0)
+    
     padded_output_rois = pad_up_to(output_rois, [1, N, 4], 0)  # shape = [2, 4], padded with -1s
-    return padded_output_rois
+    ious = pad_up_to(ious, [N], 0)
+
+    idxes = tf.argsort(ious, axis=0, direction="DESCENDING")
+    ious = tf.gather(ious, idxes, axis=0)
+    ious = tf.expand_dims(ious, axis=0)
+    ious = tf.expand_dims(ious, axis=-1, name="ious")
+    rois = tf.gather(padded_output_rois, idxes, name="rois", axis=1)
+    return rois, ious
 
 ############################################################
 #  Late Fusion Layer Class
 ############################################################
 class LateFusion(KE.Layer):
-"""
-#TODO İki şekilde çalışacak:
+    """Takes proposals and particle representations after sorting
+    them w.r.t. their IoU's and eliminates the proposals with lower IoU.
+    Returns: qualified_rois and their ious with the other set
+    [(batch, 1400, 4), (batch, 1400, 1)]
 
-1. Filiz'in particle BB'lerini okuyacak ve onlarla rpn_roileri eleyerek bir çıktı bulacak 
-bu hocaların tavot dediği yöntem ile aynı sonuçları üretmeli (burada bir sampling, feedback falan yok)
-
-    Bunu yapmak için particles diye bir array almalı aynı ParticleSupressionLayer'da olduğu gibi
-
-2. Bir önceki mask headinin çıktısını kullanarak yeni particlelar samplelayacak ve rpn roileri ile kesiştirecek
-kesişim yoksa ya particle ya mask roilerinden birini heade verecek, bir önceki framede mask_resultı yoksa 
-random initialize edebilir yeni rpn_roiler etrafından
-
-
-Yapılması gerekenler:
-    - Hangi modda çalışacağını belirten bir flag almalı?
-    - Eğer read only mode ise sadece gelen particleları rpn rois ile elemeye sokacak
-    - Eğer read only değilse, particles varsa sampler initializerı olarak kullanılabilir yoksa random init 
-    edilebilir
-"""
-############################################################
-"""Takes proposals and particle representations after sorting
-them w.r.t. their IoU's and eliminates the proposals with lower IoU.
-Returns: qualified_rois
-(batch, 1400, 4)
-
-"""
+    """
     def __init__(self, config=None, **kwargs):
         super(LateFusion, self).__init__(**kwargs)
         self.config = config
 
     def call(self, inputs):
-        return particle_layer_function(inputs, self.config.PROPS_AND_PARTS,
+        rois, ious = particle_layer_function(inputs, self.config.PROPS_AND_PARTS,
                                        self.config.IOU_THR)
+        return [rois, ious]
 
     def compute_output_shape(self, input_shape):
-        return (None, self.config.PROPS_AND_PARTICLES, 4)
+        return [(None, self.config.PROPS_AND_PARTS, 4), (None, self.config.PROPS_AND_PARTS, 1)]
 
 
 ############################################################
@@ -2461,11 +2458,11 @@ class MaskRCNN():
             # Eliminating some of the RoI's by particle filtering mechanism
             external_rois = ExternalInputLayer(config, name="external_inputs")(
                 [rpn_rois, support_particles, input_image_meta])
-            qualified_rois = LateFusion(config, name="LateFusionLayer")([rpn_rois, external_rois])
+            qualified_rois, ious = LateFusion(config, name="LateFusionLayer")([rpn_rois, external_rois])
 
             # Some modification before stepping into network heads
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
-                fpn_classifier_graph(rpn_rois, mrcnn_feature_maps, input_image_meta,
+                fpn_classifier_graph(qualified_rois, mrcnn_feature_maps, input_image_meta,
                                      config.POOL_SIZE, config.NUM_CLASSES,
                                      train_bn=config.TRAIN_BN,
                                      train_gn=config.TRAIN_GN)
@@ -2474,7 +2471,7 @@ class MaskRCNN():
             # output is [batch, num_detections, (y1, x1, y2, x2, class_id, score)] in
             # normalized coordinates
             detections = DetectionLayer(config, name="mrcnn_detection")(
-                [rpn_rois, mrcnn_class, mrcnn_bbox, input_image_meta])
+                [qualified_rois, mrcnn_class, mrcnn_bbox, input_image_meta])
 
             # Create masks for detections
             detection_boxes = KL.Lambda(lambda x: x[..., :4])(detections)
@@ -2488,7 +2485,7 @@ class MaskRCNN():
 
             model = KM.Model([input_image, input_image_meta, input_anchors, support_particles],
                              [detections, mrcnn_class_logits, mrcnn_bbox,
-                                 mrcnn_mask, rpn_rois, rpn_class, rpn_bbox],
+                                 mrcnn_mask, qualified_rois, rpn_class, rpn_bbox],
                              name='mask_rcnn')
 
         elif mode == "inference":
@@ -2522,7 +2519,7 @@ class MaskRCNN():
                              name='mask_rcnn')
 
         elif mode == "tavot":
-            qualified_rois = LateFusion(config, name="LateFusionLayer")([rpn_rois, support_particles])
+            qualified_rois, ious = LateFusion(config, name="LateFusionLayer")([rpn_rois, support_particles])
             # Network Heads
             # Proposal classifier and BBox regressor heads
             mrcnn_class_logits, mrcnn_class, mrcnn_bbox =\
@@ -3126,21 +3123,29 @@ class MaskRCNN():
         # Put a limit on how deep we go to avoid very long loops
         if len(checked) > 1000:
             return None
+
         # Convert name to a regex and allow matching a number prefix
         # because Keras adds them automatically
         if isinstance(name, str):
             name = re.compile(name.replace("/", r"(\_\d+)*/"))
 
-        parents = tensor.op.inputs
-        for p in parents:
-            if p in checked:
-                continue
-            if bool(re.fullmatch(name, p.name)):
-                return p
-            checked.append(p)
-            a = self.ancestor(p, name, checked)
-            if a is not None:
-                return a
+        if isinstance(tensor, list):
+            multiparents = [t.op.inputs for t in tensor]
+        else:
+            multiparents = [tensor.op.inputs]
+
+        for parents in multiparents:
+            for p in parents:
+                if p in checked:
+                    continue
+                if bool(re.fullmatch(name, p.name)):
+                    print("Original layer's name: ", p.name)
+                    print("Post Regex conversion: ", name)
+                    return p
+                checked.append(p)
+                a = self.ancestor(p, name, checked)
+                if a is not None:
+                    return a
         return None
 
     def find_trainable_layer(self, layer):
@@ -3178,7 +3183,13 @@ class MaskRCNN():
 
         # Organize desired outputs into an ordered dict
         outputs = OrderedDict(outputs)
-        for o in outputs.values():
+        print(outputs.items())
+        for k, o in outputs.items():
+            if isinstance(o, list):
+                for d, el in enumerate(o):
+                    new_key = k + ":" + str(d)
+                    outputs[new_key] = el
+                _ = outputs.pop(k)
             assert o is not None
 
         # Build a Keras function to run parts of the computation graph

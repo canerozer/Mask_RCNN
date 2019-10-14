@@ -797,7 +797,7 @@ def compute_recall(pred_boxes, gt_boxes, iou):
 # an easy way to support batches > 1 quickly with little code modification.
 # In the long run, it's more efficient to modify the code to support large
 # batches and getting rid of this function. Consider this a temporary solution
-def batch_slice(inputs, graph_fn, batch_size, names=None):
+def batch_slice(inputs, graph_fn, batch_size, names=None, **kwargs):
     """Splits inputs into slices and feeds each slice to a copy of the given
     computation graph and then combines the results. It allows you to run a
     graph on a batch of inputs even if the graph is written to support one
@@ -813,7 +813,7 @@ def batch_slice(inputs, graph_fn, batch_size, names=None):
     outputs = []
     for i in range(batch_size):
         inputs_slice = [x[i] for x in inputs]
-        output_slice = graph_fn(*inputs_slice)
+        output_slice = graph_fn(*inputs_slice, **kwargs)
         if not isinstance(output_slice, (tuple, list)):
             output_slice = [output_slice]
         outputs.append(output_slice)
@@ -995,3 +995,31 @@ def str2bool(v):
         return False
     else:
         raise argparse.ArgumentTypeError('Boolean value expected.')
+
+def particle_array_const(particle_file, first_img, config=None):
+    first_img = skimage.io.imread(first_img)
+    dim_y, dim_x, _ = first_img.shape
+
+    particles = []
+    with open(particle_file, "r+") as f:
+        particles.append(f.read().split("\n"))
+    particles = particles[0][:-1]
+    particles = [temp.split(" ") for temp in particles]
+    particles_np = np.array(particles).astype(np.float64)
+
+    # Get the scale and padding parameters by using resize_image.
+    _, _, scale, pad, _ = resize_image(first_img,
+                                       min_dim=config.IMAGE_MIN_DIM,
+                                       max_dim=config.IMAGE_MAX_DIM,
+                                       min_scale=config.IMAGE_MIN_SCALE,
+                                       mode="square")
+
+    # Roughly calculate padding across different axises.
+    aver_pad_y = (pad[0][0] + pad[0][1])/2
+    aver_pad_x = (pad[1][0] + pad[1][1])/2
+
+    particles_np *= np.array((dim_y, dim_x, dim_y, dim_x))
+    particles_np = (particles_np * scale) + np.array((aver_pad_y, aver_pad_x, aver_pad_y, aver_pad_x))
+    particles_np /= np.array((1024, 1024, 1024, 1024))
+    particles_np = particles_np.reshape((-1, config.P   , 4))
+    return particles_np

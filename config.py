@@ -211,8 +211,8 @@ class Config(object):
     # Importing particles for inference instead of using RPN outputs
     POST_PS_ROIS_INFERENCE = 1000 # 1000 if using RPN
     P = 400
-    PROPS_AND_PARTICLES = POST_PS_ROIS_INFERENCE + P 
-    IOU_THR = 0.3
+    PROPS_AND_PARTS = POST_PS_ROIS_INFERENCE + P 
+    IOU_THR = 0.30
 
     FILTER_BACKGROUND = True
 
